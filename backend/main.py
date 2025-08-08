@@ -46,6 +46,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:8080",
         "http://127.0.0.1:8080",
+        "http://localhost:5173", # Vite default dev server
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -92,6 +94,16 @@ class UserCreate(PBase):
     role: str  # 'teacher' or 'student'
 
 
+class UserRead(PBase):
+    id: str
+    email: str
+    role: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
 def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> DBUser:
     credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials")
     try:
@@ -135,6 +147,16 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         raise HTTPException(status_code=400, detail="Incorrect email or password")
     token = create_access_token({"sub": user.id})
     return Token(access_token=token)
+
+
+@app.get("/auth/me", response_model=UserRead)
+def get_current_user_profile(user: DBUser = Depends(get_current_user)):
+    return UserRead(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        created_at=user.created_at
+    )
 
 
 @app.post("/generate-code", response_model=GenerateCodeResponse)
