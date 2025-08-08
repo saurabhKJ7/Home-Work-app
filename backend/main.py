@@ -17,9 +17,14 @@ from models.schema import (
     AttemptCreate,
     AttemptRead,
 )
-from models.db_models import Activity as DBActivity, Attempt as DBAttempt
+from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser
 from utils.db import get_db, Base, engine
 from sqlalchemy.orm import Session
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from datetime import datetime, timedelta
+from pydantic import BaseModel as PBase
 from src.llm_chain import get_evaluate_function, feedback_function
 from src.retrieval import retrieve_similar_examples, get_embeddings
 
@@ -51,6 +56,85 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+# --- Auth setup ---
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE", "60"))
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+class Token(PBase):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserCreate(PBase):
+    email: str
+    password: str
+    role: str  # 'teacher' or 'student'
+
+
+def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> DBUser:
+    credentials_exception = HTTPException(status_code=401, detail="Could not validate credentials")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user:
+        raise credentials_exception
+    return user
+
+
+def require_role(role: str):
+    def dep(user: DBUser = Depends(get_current_user)):
+        if user.role != role:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+    return dep
+
+
+@app.post("/auth/register", response_model=Token)
+def register(payload: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(DBUser).filter(DBUser.email == payload.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user = DBUser(email=payload.email, password_hash=hash_password(payload.password), role=payload.role)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    token = create_access_token({"sub": user.id})
+    return Token(access_token=token)
+
+
+@app.post("/auth/login", response_model=Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(DBUser).filter(DBUser.email == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Incorrect email or password")
+    token = create_access_token({"sub": user.id})
+    return Token(access_token=token)
 
 
 @app.post("/generate-code", response_model=GenerateCodeResponse)
@@ -93,7 +177,7 @@ async def feedback_answer(payload: FeedbackRequest):
 # Activities CRUD (minimal)
 
 @app.post("/activities", response_model=ActivityRead)
-def create_activity(payload: ActivityCreate, db: Session = Depends(get_db)):
+def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user: DBUser = Depends(require_role("teacher"))):
     activity = DBActivity(
         title=payload.title,
         worksheet_level=payload.worksheet_level,
@@ -122,7 +206,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/activities", response_model=list[ActivityRead])
-def list_activities(db: Session = Depends(get_db)):
+def list_activities(db: Session = Depends(get_db), user: DBUser = Depends(get_current_user)):
     rows = db.query(DBActivity).order_by(DBActivity.created_at.desc()).all()
     return [
         ActivityRead(
@@ -142,7 +226,7 @@ def list_activities(db: Session = Depends(get_db)):
 
 
 @app.get("/activities/{activity_id}", response_model=ActivityRead)
-def get_activity(activity_id: str, db: Session = Depends(get_db)):
+def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser = Depends(get_current_user)):
     a = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Activity not found")
@@ -161,7 +245,7 @@ def get_activity(activity_id: str, db: Session = Depends(get_db)):
 
 
 @app.delete("/activities/{activity_id}")
-def delete_activity(activity_id: str, db: Session = Depends(get_db)):
+def delete_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser = Depends(require_role("teacher"))):
     a = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Activity not found")
@@ -171,7 +255,7 @@ def delete_activity(activity_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/activities/{activity_id}/attempts", response_model=AttemptRead)
-def create_attempt(activity_id: str, payload: AttemptCreate, db: Session = Depends(get_db)):
+def create_attempt(activity_id: str, payload: AttemptCreate, db: Session = Depends(get_db), user: DBUser = Depends(require_role("student"))):
     # For now, keep correctness empty; rely on client or future server logic
     attempt = DBAttempt(
         activity_id=activity_id,

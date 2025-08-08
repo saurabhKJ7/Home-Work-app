@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, JSON, func
+from sqlalchemy import Column, String, Text, DateTime, JSON, func, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from utils.db import Base
 import uuid
@@ -33,6 +33,16 @@ class Attempt(Base):
     feedback = Column(Text, nullable=True)
     confidence_score = Column(String, nullable=False, default="0")
     time_spent_seconds = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    email = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False)  # 'teacher' or 'student'
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

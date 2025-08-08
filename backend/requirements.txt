@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 python-dotenv
+python-multipart
 
 # LangChain and providers
 langchain
@@ -14,6 +15,9 @@ sentence-transformers
 # Database
 SQLAlchemy
 psycopg2-binary
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
 
 # Data tools (optional)
 pandas
