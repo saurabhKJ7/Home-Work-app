@@ -10,7 +10,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { getActivityById, submitAttempt, postJson } from "@/lib/api";
+import { getActivityById, submitAttempt, postJson, validateSubmission } from "@/lib/api";
 
 // Mock activity data with content
 const mockActivityContent = {
@@ -123,7 +123,8 @@ const ActivityDetail = () => {
           problemStatement: activityData.problem_statement,
           createdAt: activityData.created_at,
           userId: activityData.user_id,
-          content: activityData.ui_config || {}
+          content: activityData.ui_config || {},
+          validation_function: activityData.validation_function || (() => { try { return localStorage.getItem(`activity:${activityData.id}:code`) || "" } catch { return "" } })()
         };
         
         // If we don't have content from the backend, use mock data based on type
@@ -223,12 +224,24 @@ const ActivityDetail = () => {
     const timeSpent = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
     
     let score;
-    if (activity.type === 'Grid-based') {
-      score = calculateScore(answers, activity.content.answer, activity.type);
-    } else if (activity.type === 'Mathematical') {
-      score = calculateScore(answers, activity.content.math, activity.type);
-    } else {
-      score = calculateScore(answers, activity.content.logic, activity.type);
+    try {
+      if (activity.type === 'Grid-based') {
+        // Use backend validation when correct answer is not available
+        if (!activity.content?.answer) {
+          const backendValidation = await validateSubmission(id, answers, token);
+          const percentage = backendValidation.is_correct ? 100 : 0;
+          score = { correct: backendValidation.is_correct ? 1 : 0, total: 1, percentage };
+        } else {
+          score = calculateScore(answers, activity.content.answer, activity.type);
+        }
+      } else if (activity.type === 'Mathematical') {
+        score = calculateScore(answers, activity.content.math, activity.type);
+      } else {
+        score = calculateScore(answers, activity.content.logic, activity.type);
+      }
+    } catch (e) {
+      // Fallback scoring if validation API fails
+      score = { correct: 0, total: 0, percentage: 0 };
     }
 
     const result = {
@@ -249,9 +262,10 @@ const ActivityDetail = () => {
       
       // Try backend feedback
       try {
-        const generated_function = (() => {
-          try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" }
-        })();
+        // Prefer validation function from backend activity; fallback to any temp local preview storage
+        const generated_function = activity.validation_function && activity.validation_function.length > 0
+          ? activity.validation_function
+          : (() => { try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" } })();
         const feedbackResponse = await postJson("/feedback-answer", {
           user_query: activity.problemStatement,
           generated_function,

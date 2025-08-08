@@ -155,3 +155,29 @@ export async function submitAttempt(activityId: string, attemptData: any, token:
   return postJson(`/activities/${activityId}/attempts`, attemptData, token);
 }
 
+// Validate submission via backend validator (aligns with PRD validation pipeline)
+export async function validateSubmission(activityId: string, submission: any, token: string): Promise<{ is_correct: boolean; feedback: string; confidence_score: number; metadata?: any; }> {
+  return postJson(`/validate-function`, {
+    activity_id: activityId,
+    student_response: submission,
+    attempt_number: 1,
+    context_variables: {}
+  }, token);
+}
+
+// Meta-validate a generated function (PRD feature)
+export async function metaValidate(activity_description: string, validation_type: string, expected_answers: any[]): Promise<{
+  validation_function: string;
+  feedback_function: string;
+  is_reliable: boolean;
+  accuracy_score: number;
+  confidence_level: number;
+  improvement_suggestions: string[];
+}> {
+  return postJson(`/meta-validate`, {
+    activity_description,
+    validation_type,
+    expected_answers,
+  });
+}
+

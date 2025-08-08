@@ -15,7 +15,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { PlusCircle, Eye, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { postJson, fetchActivities, createActivity, deleteActivity } from "@/lib/api";
+import { postJson, fetchActivities, createActivity, deleteActivity, metaValidate } from "@/lib/api";
 
 // Mock data for activities
 const mockActivities: Activity[] = [
@@ -76,6 +76,7 @@ const TeacherDashboard = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [previewActivity, setPreviewActivity] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [metaResult, setMetaResult] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const { user, token } = useAuth();
@@ -166,18 +167,38 @@ const TeacherDashboard = () => {
     setIsGenerating(true);
     try {
       const data = await postJson("/generate-code", 
-        { user_query: formData.problemStatement || formData.title },
+        { user_query: formData.problemStatement || formData.title, type: formData.type },
         token
       );
       const validationFunction = data?.code || "";
+      const generatedQuestion = data?.question || "";
+      // Build preview content based on type, using the LLM-generated question when available
+      let previewContent: any = { ...mockGeneratedContent };
+      if ((formData.type === 'Mathematical') && generatedQuestion) {
+        previewContent = {
+          math: [
+            { id: '1', question: generatedQuestion, answer: 0 }
+          ]
+        };
+      }
+      // Attach the generated validation function
+      previewContent.validationFunction = validationFunction;
+
       const newPreview = {
         ...formData,
         id: Date.now().toString(),
         createdAt: new Date().toISOString(),
-        // keep current mock UI content for demo, attach generated code
-        content: { ...mockGeneratedContent, validationFunction },
+        content: previewContent,
       };
+      // If backend provided a question, use it as the problem statement for preview
+      if (generatedQuestion) {
+        newPreview.problemStatement = generatedQuestion;
+      }
       setPreviewActivity(newPreview);
+      // Also reflect the generated question in the form if it was empty
+      if (!formData.problemStatement && generatedQuestion) {
+        setFormData(prev => ({ ...prev, problemStatement: generatedQuestion }));
+      }
       // Save to localStorage so ActivityDetail can retrieve generated function by id if needed
       try { localStorage.setItem(`activity:${newPreview.id}:code`, validationFunction); } catch {}
       toast({ title: "Activity Generated!", description: "Review it in the preview area." });
@@ -422,9 +443,48 @@ const TeacherDashboard = () => {
                         />
                       )}
 
-                      <Button onClick={handlePublishActivity} variant="success" className="w-full">
-                        Publish Activity
-                      </Button>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Button onClick={handlePublishActivity} variant="success" className="w-full">
+                          Publish Activity
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={async () => {
+                            try {
+                              setMetaResult(null);
+                              const res = await metaValidate(
+                                previewActivity.problemStatement || previewActivity.title,
+                                previewActivity.type || 'Mathematical',
+                                []
+                              );
+                              setMetaResult(res);
+                              toast({ title: 'Meta-validation complete', description: `Accuracy ${Math.round(res.accuracy_score * 100)}%` });
+                            } catch (e: any) {
+                              toast({ title: 'Meta-validation failed', description: e?.message || 'Backend error', variant: 'destructive' });
+                            }
+                          }}
+                        >
+                          Run Meta-Validation
+                        </Button>
+                      </div>
+
+                      {metaResult && (
+                        <div className="p-3 border rounded-md bg-muted/30 space-y-2">
+                          <p className="text-sm"><strong>Reliable:</strong> {metaResult.is_reliable ? 'Yes' : 'No'}</p>
+                          <p className="text-sm"><strong>Accuracy:</strong> {Math.round(metaResult.accuracy_score * 100)}%</p>
+                          <p className="text-sm"><strong>Confidence:</strong> {Math.round(metaResult.confidence_level * 100)}%</p>
+                          {metaResult.improvement_suggestions?.length > 0 && (
+                            <div className="text-sm">
+                              <strong>Suggestions:</strong>
+                              <ul className="list-disc pl-5">
+                                {metaResult.improvement_suggestions.map((s: string, i: number) => (
+                                  <li key={i}>{s}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-center py-12 text-muted-foreground">

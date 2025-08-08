@@ -71,12 +71,16 @@ const ActivityCard = ({ activity, onStart, onEdit, onDelete, isTeacherView = fal
       <CardFooter className="pt-0">
         {isTeacherView ? (
           <div className="flex space-x-2 w-full">
-            <Button variant="outline" size="sm" onClick={() => onEdit?.(activity.id)} className="flex-1">
-              Edit
-            </Button>
-            <Button variant="destructive" size="sm" onClick={() => onDelete?.(activity.id)} className="flex-1">
-              Delete
-            </Button>
+            {onEdit && (
+              <Button variant="outline" size="sm" onClick={() => onEdit(activity.id)} className="flex-1">
+                Edit
+              </Button>
+            )}
+            {onDelete && (
+              <Button variant="destructive" size="sm" onClick={() => onDelete(activity.id)} className="flex-1">
+                Delete
+              </Button>
+            )}
           </div>
         ) : (
           <Button 
