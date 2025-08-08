@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { GraduationCap, Users, BookOpen, Wand2, Target, Brain } from "lucide-react";
+import { GraduationCap, Users, BookOpen, Wand2, Target, Brain, LogIn } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Index = () => {
+  const { isAuthenticated, user } = useAuth();
   return (
     <div className="min-h-screen bg-subtle-gradient">
       {/* Hero Section */}
@@ -24,19 +26,28 @@ const Index = () => {
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
-              <Button variant="hero" size="lg" asChild className="bg-white text-primary hover:bg-white/90">
-                <Link to="/teacher" className="flex items-center space-x-2">
-                  <Users className="w-5 h-5" />
-                  <span>Teacher Dashboard</span>
-                </Link>
-              </Button>
-              
-              <Button variant="outline" size="lg" asChild className="border-white/30 text-white hover:bg-white/10">
-                <Link to="/student" className="flex items-center space-x-2">
-                  <BookOpen className="w-5 h-5" />
-                  <span>Student Portal</span>
-                </Link>
-              </Button>
+              {!isAuthenticated ? (
+                <Button variant="hero" size="lg" asChild className="bg-white text-primary hover:bg-white/90">
+                  <Link to="/login" className="flex items-center space-x-2">
+                    <LogIn className="w-5 h-5" />
+                    <span>Log In to Get Started</span>
+                  </Link>
+                </Button>
+              ) : user?.role === 'teacher' ? (
+                <Button variant="hero" size="lg" asChild className="bg-white text-primary hover:bg-white/90">
+                  <Link to="/teacher" className="flex items-center space-x-2">
+                    <Users className="w-5 h-5" />
+                    <span>Teacher Dashboard</span>
+                  </Link>
+                </Button>
+              ) : (
+                <Button variant="hero" size="lg" asChild className="bg-white text-primary hover:bg-white/90">
+                  <Link to="/student" className="flex items-center space-x-2">
+                    <BookOpen className="w-5 h-5" />
+                    <span>Student Portal</span>
+                  </Link>
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -99,12 +110,19 @@ const Index = () => {
                 Join educators worldwide who are making learning more interactive and engaging
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Button variant="hero" size="lg" asChild>
-                  <Link to="/teacher">Start Creating Activities</Link>
-                </Button>
-                <Button variant="gamelike" size="lg" asChild>
-                  <Link to="/student">Explore Student Experience</Link>
-                </Button>
+                {!isAuthenticated ? (
+                  <Button variant="hero" size="lg" asChild>
+                    <Link to="/register">Create an Account</Link>
+                  </Button>
+                ) : user?.role === 'teacher' ? (
+                  <Button variant="hero" size="lg" asChild>
+                    <Link to="/teacher">Start Creating Activities</Link>
+                  </Button>
+                ) : (
+                  <Button variant="gamelike" size="lg" asChild>
+                    <Link to="/student">Explore Activities</Link>
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

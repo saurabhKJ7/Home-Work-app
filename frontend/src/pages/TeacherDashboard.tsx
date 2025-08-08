@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +14,8 @@ import MathQuestion from "@/components/MathQuestion";
 import LogicQuestion from "@/components/LogicQuestion";
 import { PlusCircle, Eye, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { postJson } from "@/lib/api";
 
 // Mock data for activities
 const mockActivities: Activity[] = [
@@ -74,6 +77,20 @@ const TeacherDashboard = () => {
   const [previewActivity, setPreviewActivity] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const { toast } = useToast();
+  const { user, token } = useAuth();
+  const navigate = useNavigate();
+  
+  // Verify that the user is a teacher, redirect if not
+  useEffect(() => {
+    if (user && user.role !== 'teacher') {
+      toast({
+        title: "Access Denied",
+        description: "You don't have permission to access the Teacher Dashboard",
+        variant: "destructive"
+      });
+      navigate("/");
+    }
+  }, [user, navigate, toast]);
 
   const [formData, setFormData] = useState({
     worksheetLevel: '',
@@ -97,16 +114,21 @@ const TeacherDashboard = () => {
       return;
     }
 
+    if (!token) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to create activities.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsGenerating(true);
     try {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000";
-      const res = await fetch(`${baseUrl}/generate-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_query: formData.problemStatement || formData.title }),
-      });
-      if (!res.ok) throw new Error(`Failed: ${res.status}`);
-      const data = await res.json();
+      const data = await postJson("/generate-code", 
+        { user_query: formData.problemStatement || formData.title },
+        token
+      );
       const validationFunction = data?.code || "";
       const newPreview = {
         ...formData,
@@ -126,7 +148,7 @@ const TeacherDashboard = () => {
     }
   };
 
-  const handlePublishActivity = () => {
+  const handlePublishActivity = async () => {
     if (!previewActivity) return;
 
     const newActivity: Activity = {

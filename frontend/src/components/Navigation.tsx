@@ -48,6 +48,7 @@ const Navigation = () => {
           </Link>
           
           <div className="flex items-center space-x-4">
+            {/* Only show the appropriate link based on user role */}
             {isAuthenticated && user?.role === "teacher" && (
               <Button 
                 variant={location.pathname === '/teacher' ? 'default' : 'ghost'}
