@@ -15,7 +15,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { PlusCircle, Eye, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { postJson } from "@/lib/api";
+import { postJson, fetchActivities, createActivity, deleteActivity } from "@/lib/api";
 
 // Mock data for activities
 const mockActivities: Activity[] = [
@@ -73,9 +73,10 @@ const mockGeneratedContent = {
 };
 
 const TeacherDashboard = () => {
-  const [activities, setActivities] = useState<Activity[]>(mockActivities);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [previewActivity, setPreviewActivity] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const { user, token } = useAuth();
   const navigate = useNavigate();
@@ -91,6 +92,45 @@ const TeacherDashboard = () => {
       navigate("/");
     }
   }, [user, navigate, toast]);
+  
+  // Fetch activities from the server
+  useEffect(() => {
+    const loadActivities = async () => {
+      if (!token || !user) return;
+      
+      try {
+        setIsLoading(true);
+        const data = await fetchActivities(token);
+        
+        // Map backend data to our Activity interface
+        const mappedActivities: Activity[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          worksheetLevel: item.worksheet_level,
+          type: item.type as any,
+          difficulty: item.difficulty as any,
+          problemStatement: item.problem_statement,
+          createdAt: item.created_at,
+          userId: item.user_id // Store the user_id
+        }));
+        
+        // Only show activities created by this teacher
+        const teacherActivities = mappedActivities.filter(activity => activity.userId === user.id);
+        setActivities(teacherActivities);
+      } catch (error) {
+        console.error('Failed to fetch activities:', error);
+        toast({
+          title: "Failed to load activities",
+          description: "Please try refreshing the page",
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadActivities();
+  }, [token, toast, user]);
 
   const [formData, setFormData] = useState({
     worksheetLevel: '',
@@ -149,40 +189,77 @@ const TeacherDashboard = () => {
   };
 
   const handlePublishActivity = async () => {
-    if (!previewActivity) return;
+    if (!previewActivity || !token) return;
+    
+    try {
+      // Prepare activity data for API
+      const activityData = {
+        title: previewActivity.title,
+        worksheet_level: previewActivity.worksheetLevel,
+        type: previewActivity.type,
+        difficulty: previewActivity.difficulty,
+        problem_statement: previewActivity.problemStatement,
+        ui_config: previewActivity.content,
+        validation_function: previewActivity.content.validationFunction,
+        correct_answers: {}
+      };
+      
+      // Send to backend
+      const createdActivity = await createActivity(activityData, token);
+      
+      // Update local state
+      const newActivity: Activity = {
+        id: createdActivity.id,
+        title: createdActivity.title,
+        worksheetLevel: createdActivity.worksheet_level,
+        type: createdActivity.type as any,
+        difficulty: createdActivity.difficulty as any,
+        problemStatement: createdActivity.problem_statement,
+        createdAt: createdActivity.created_at
+      };
 
-    const newActivity: Activity = {
-      id: previewActivity.id,
-      title: previewActivity.title,
-      worksheetLevel: previewActivity.worksheetLevel,
-      type: previewActivity.type,
-      difficulty: previewActivity.difficulty,
-      problemStatement: previewActivity.problemStatement,
-      createdAt: previewActivity.createdAt
-    };
+      setActivities(prev => [newActivity, ...prev]);
+      setPreviewActivity(null);
+      setFormData({
+        worksheetLevel: '',
+        title: '',
+        problemStatement: '',
+        type: '',
+        difficulty: ''
+      });
 
-    setActivities(prev => [newActivity, ...prev]);
-    setPreviewActivity(null);
-    setFormData({
-      worksheetLevel: '',
-      title: '',
-      problemStatement: '',
-      type: '',
-      difficulty: ''
-    });
-
-    toast({
-      title: "Activity Published!",
-      description: "Your activity is now available to students."
-    });
+      toast({
+        title: "Activity Published!",
+        description: "Your activity is now available to students."
+      });
+    } catch (error) {
+      console.error('Failed to publish activity:', error);
+      toast({
+        title: "Failed to publish activity",
+        description: "Please try again",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleDeleteActivity = (id: string) => {
-    setActivities(prev => prev.filter(a => a.id !== id));
-    toast({
-      title: "Activity Deleted",
-      description: "The activity has been removed from your dashboard."
-    });
+  const handleDeleteActivity = async (id: string) => {
+    if (!token) return;
+    
+    try {
+      await deleteActivity(id, token);
+      setActivities(prev => prev.filter(a => a.id !== id));
+      toast({
+        title: "Activity Deleted",
+        description: "The activity has been removed from your dashboard."
+      });
+    } catch (error) {
+      console.error('Failed to delete activity:', error);
+      toast({
+        title: "Failed to delete activity",
+        description: "Please try again",
+        variant: "destructive"
+      });
+    }
   };
 
   return (
@@ -369,7 +446,12 @@ const TeacherDashboard = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {activities.length > 0 ? (
+                {isLoading ? (
+                  <div className="text-center py-12">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    <p className="mt-2 text-sm text-muted-foreground">Loading activities...</p>
+                  </div>
+                ) : activities.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {activities.map((activity) => (
                       <ActivityCard

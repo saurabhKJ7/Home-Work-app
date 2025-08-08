@@ -40,15 +40,33 @@ def on_startup():
         # Defer hard failure; surface via logs so API can still start
         print(f"[startup] DB init error: {e}")
 
-# CORS for dev
+# Custom CORS middleware to ensure headers are always sent
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import JSONResponse
+
+class CustomCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Handle preflight requests
+        if request.method == "OPTIONS":
+            response = JSONResponse(content={})
+        else:
+            response = await call_next(request)
+            
+        # Add CORS headers to every response
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        
+        return response
+
+# Add custom CORS middleware
+app.add_middleware(CustomCORSMiddleware)
+
+# Standard FastAPI CORS middleware as backup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "http://localhost:5173", # Vite default dev server
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -201,6 +219,7 @@ async def feedback_answer(payload: FeedbackRequest):
 @app.post("/activities", response_model=ActivityRead)
 def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user: DBUser = Depends(require_role("teacher"))):
     activity = DBActivity(
+        user_id=user.id,  # Add user_id from the authenticated teacher
         title=payload.title,
         worksheet_level=payload.worksheet_level,
         type=payload.type,
@@ -215,6 +234,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
     db.refresh(activity)
     return ActivityRead(
         id=activity.id,
+        user_id=activity.user_id,
         title=activity.title,
         worksheet_level=activity.worksheet_level,
         type=activity.type,
@@ -229,10 +249,17 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
 
 @app.get("/activities", response_model=list[ActivityRead])
 def list_activities(db: Session = Depends(get_db), user: DBUser = Depends(get_current_user)):
-    rows = db.query(DBActivity).order_by(DBActivity.created_at.desc()).all()
+    # For teachers: show only their created activities
+    # For students: show all activities
+    if user.role == "teacher":
+        rows = db.query(DBActivity).filter(DBActivity.user_id == user.id).order_by(DBActivity.created_at.desc()).all()
+    else:
+        rows = db.query(DBActivity).order_by(DBActivity.created_at.desc()).all()
+    
     return [
         ActivityRead(
             id=a.id,
+            user_id=a.user_id,
             title=a.title,
             worksheet_level=a.worksheet_level,
             type=a.type,
@@ -252,8 +279,14 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
     a = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Activity not found")
+    
+    # If user is a teacher, they can only view their own activities
+    if user.role == "teacher" and a.user_id != user.id:
+        raise HTTPException(status_code=403, detail="You don't have permission to access this activity")
+        
     return ActivityRead(
         id=a.id,
+        user_id=a.user_id,
         title=a.title,
         worksheet_level=a.worksheet_level,
         type=a.type,
@@ -271,6 +304,11 @@ def delete_activity(activity_id: str, db: Session = Depends(get_db), user: DBUse
     a = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
     if not a:
         raise HTTPException(status_code=404, detail="Activity not found")
+    
+    # Teachers can only delete their own activities
+    if a.user_id != user.id:
+        raise HTTPException(status_code=403, detail="You don't have permission to delete this activity")
+        
     db.delete(a)
     db.commit()
     return {"ok": True}
@@ -278,8 +316,14 @@ def delete_activity(activity_id: str, db: Session = Depends(get_db), user: DBUse
 
 @app.post("/activities/{activity_id}/attempts", response_model=AttemptRead)
 def create_attempt(activity_id: str, payload: AttemptCreate, db: Session = Depends(get_db), user: DBUser = Depends(require_role("student"))):
-    # For now, keep correctness empty; rely on client or future server logic
+    # Verify the activity exists
+    activity = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    
+    # Create attempt with student's user_id
     attempt = DBAttempt(
+        user_id=user.id,  # Add user_id from the authenticated student
         activity_id=activity_id,
         submission=payload.submission,
         is_correct="false",
@@ -293,6 +337,7 @@ def create_attempt(activity_id: str, payload: AttemptCreate, db: Session = Depen
     db.refresh(attempt)
     return AttemptRead(
         id=attempt.id,
+        user_id=attempt.user_id,
         activity_id=attempt.activity_id,
         submission=attempt.submission,
         is_correct=(attempt.is_correct == "true"),

@@ -11,6 +11,7 @@ class Activity(Base):
     __tablename__ = "activities"
 
     id = Column(String, primary_key=True, default=gen_id)
+    user_id = Column(String, nullable=False, index=True)  # Teacher who created the activity
     title = Column(String, nullable=False)
     worksheet_level = Column(String, nullable=False)
     type = Column(String, nullable=False)
@@ -26,6 +27,7 @@ class Attempt(Base):
     __tablename__ = "attempts"
 
     id = Column(String, primary_key=True, default=gen_id)
+    user_id = Column(String, nullable=False, index=True)  # Student who made the attempt
     activity_id = Column(String, nullable=False, index=True)
     submission = Column(JSONB, nullable=False)
     is_correct = Column(String, nullable=False, default="false")  # store as 'true'/'false' simple

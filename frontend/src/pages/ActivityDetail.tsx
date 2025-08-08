@@ -7,8 +7,10 @@ import { Progress } from "@/components/ui/progress";
 import GridPuzzle from "@/components/GridPuzzle";
 import MathQuestion from "@/components/MathQuestion";
 import LogicQuestion from "@/components/LogicQuestion";
-import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw } from "lucide-react";
+import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { getActivityById, submitAttempt, postJson } from "@/lib/api";
 
 // Mock activity data with content
 const mockActivityContent = {
@@ -83,19 +85,103 @@ const ActivityDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, token } = useAuth();
   
   const [activity, setActivity] = useState<any>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<any>(null);
   const [startTime] = useState(new Date());
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Verify that the user is a student, redirect if not
+  useEffect(() => {
+    if (user && user.role !== 'student') {
+      toast({
+        title: "Access Denied",
+        description: "You don't have permission to access student activities",
+        variant: "destructive"
+      });
+      navigate("/");
+    }
+  }, [user, navigate, toast]);
 
   useEffect(() => {
-    if (id && mockActivityContent[id as keyof typeof mockActivityContent]) {
-      setActivity(mockActivityContent[id as keyof typeof mockActivityContent]);
-    } else {
-      navigate('/student');
-    }
-  }, [id, navigate]);
+    const fetchActivity = async () => {
+      if (!id || !token) return;
+      
+      try {
+        setIsLoading(true);
+        const activityData = await getActivityById(id, token);
+        
+        // Transform the data to match our component's expected format
+        const transformedActivity = {
+          id: activityData.id,
+          title: activityData.title,
+          worksheetLevel: activityData.worksheet_level,
+          type: activityData.type,
+          difficulty: activityData.difficulty,
+          problemStatement: activityData.problem_statement,
+          createdAt: activityData.created_at,
+          userId: activityData.user_id,
+          content: activityData.ui_config || {}
+        };
+        
+        // If we don't have content from the backend, use mock data based on type
+        if (!transformedActivity.content || Object.keys(transformedActivity.content).length === 0) {
+          if (mockActivityContent[id as keyof typeof mockActivityContent]) {
+            transformedActivity.content = mockActivityContent[id as keyof typeof mockActivityContent].content;
+          } else {
+            // Default mock content based on type
+            // Default content based on activity type
+            if (transformedActivity.type === 'Grid-based') {
+              transformedActivity.content = {
+                grid: [
+                  [5, 3, 0, 0, 7, 0, 0, 0, 0],
+                  [6, 0, 0, 1, 9, 5, 0, 0, 0],
+                  [0, 9, 8, 0, 0, 0, 0, 6, 0],
+                  [8, 0, 0, 0, 6, 0, 0, 0, 3],
+                  [4, 0, 0, 8, 0, 3, 0, 0, 1],
+                  [7, 0, 0, 0, 2, 0, 0, 0, 6],
+                  [0, 6, 0, 0, 0, 0, 2, 8, 0],
+                  [0, 0, 0, 4, 1, 9, 0, 0, 5],
+                  [0, 0, 0, 0, 8, 0, 0, 7, 9]
+                ]
+              };
+            } else if (transformedActivity.type === 'Mathematical') {
+              transformedActivity.content = {
+                math: [
+                  { id: "1", question: "Solve for x: 2x + 5 = 13", answer: 4 },
+                  { id: "2", question: "What is 15% of 80?", answer: 12 },
+                  { id: "3", question: "If y = 3x - 2 and x = 5, what is y?", answer: 13 }
+                ]
+              };
+            } else {
+              transformedActivity.content = {
+                logic: [
+                  { id: "1", question: "What comes next in the sequence: 2, 6, 18, 54, ?", type: "text" as const, answer: "162" },
+                  { id: "2", question: "If all cats are animals and some animals are pets, which is true?", type: "multiple-choice" as const, options: ["All cats are pets", "Some cats might be pets", "No cats are pets", "All pets are cats"], answer: "Some cats might be pets" }
+                ]
+              };
+            }
+          }
+        }
+        
+        setActivity(transformedActivity);
+      } catch (error) {
+        console.error('Failed to fetch activity:', error);
+        toast({
+          title: "Failed to load activity",
+          description: "Please try again later",
+          variant: "destructive"
+        });
+        navigate('/student');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    fetchActivity();
+  }, [id, token, navigate, toast]);
 
   const calculateScore = (userAnswers: any, correctAnswers: any, type: string) => {
     if (type === 'Grid-based') {
@@ -131,6 +217,8 @@ const ActivityDetail = () => {
   };
 
   const handleSubmit = async (answers: any) => {
+    if (!token || !activity || !id) return;
+    
     const endTime = new Date();
     const timeSpent = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
     
@@ -152,28 +240,40 @@ const ActivityDetail = () => {
                 'Keep practicing!'
     };
 
-    // Try backend feedback
     try {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000";
-      const generated_function = (() => {
-        try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" }
-      })();
-      const res = await fetch(`${baseUrl}/feedback-answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // Submit attempt to the database
+      await submitAttempt(id, {
+        submission: answers,
+        time_spent_seconds: timeSpent
+      }, token);
+      
+      // Try backend feedback
+      try {
+        const generated_function = (() => {
+          try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" }
+        })();
+        const feedbackResponse = await postJson("/feedback-answer", {
           user_query: activity.problemStatement,
           generated_function,
           submission: answers,
           activity_type: activity.type,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        result.feedback = data?.feedback || result.feedback;
-        (result as any).confidence = data?.confidence_score;
+        }, token);
+        
+        if (feedbackResponse) {
+          result.feedback = feedbackResponse?.feedback || result.feedback;
+          (result as any).confidence = feedbackResponse?.confidence_score;
+        }
+      } catch (error) {
+        console.error('Error getting feedback:', error);
       }
-    } catch {}
+    } catch (error) {
+      console.error('Error submitting attempt:', error);
+      toast({
+        title: "Submission saved locally",
+        description: "Could not save to server, but your results are available here",
+        variant: "destructive"
+      });
+    }
 
     setSubmissionResult(result);
     setIsSubmitted(true);
@@ -206,6 +306,17 @@ const ActivityDetail = () => {
     return `${minutes}m ${remainingSeconds}s`;
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-subtle-gradient flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-10 w-10 animate-spin mx-auto mb-4 text-primary" />
+          <h2 className="text-2xl font-bold">Loading activity...</h2>
+        </div>
+      </div>
+    );
+  }
+  
   if (!activity) {
     return (
       <div className="min-h-screen bg-subtle-gradient flex items-center justify-center">

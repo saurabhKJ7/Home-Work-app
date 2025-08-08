@@ -69,6 +69,7 @@ class ActivityCreate(ActivityBase):
 
 class ActivityRead(ActivityBase):
     id: str
+    user_id: str
     created_at: datetime
 
     class Config:
@@ -82,6 +83,7 @@ class AttemptCreate(BaseModel):
 
 class AttemptRead(BaseModel):
     id: str
+    user_id: str
     activity_id: str
     submission: Any
     is_correct: bool

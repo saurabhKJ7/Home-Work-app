@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import ActivityCard, { Activity } from "@/components/ActivityCard";
 import { BookOpen, Trophy, Target, Clock } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchActivities } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 // Mock data for available activities
 const mockActivities: Activity[] = [
@@ -65,9 +68,59 @@ const mockActivities: Activity[] = [
 ];
 
 const StudentPortal = () => {
-  const [activities] = useState<Activity[]>(mockActivities);
+  const [activities, setActivities] = useState<Activity[]>([]);
   const [filter, setFilter] = useState<string>('all');
+  const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
+  const { user, token } = useAuth();
+  const { toast } = useToast();
+  
+  // Verify that the user is a student, redirect if not
+  useEffect(() => {
+    if (user && user.role !== 'student') {
+      toast({
+        title: "Access Denied",
+        description: "You don't have permission to access the Student Portal",
+        variant: "destructive"
+      });
+      navigate("/");
+    }
+  }, [user, navigate, toast]);
+  
+  // Fetch activities from the server
+  useEffect(() => {
+    const loadActivities = async () => {
+      if (!token) return;
+      
+      try {
+        setIsLoading(true);
+        const data = await fetchActivities(token);
+        // Map backend data to our Activity interface
+        const mappedActivities: Activity[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          worksheetLevel: item.worksheet_level,
+          type: item.type as any,
+          difficulty: item.difficulty as any,
+          problemStatement: item.problem_statement,
+          createdAt: item.created_at,
+          userId: item.user_id
+        }));
+        setActivities(mappedActivities);
+      } catch (error) {
+        console.error('Failed to fetch activities:', error);
+        toast({
+          title: "Failed to load activities",
+          description: "Please try refreshing the page",
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadActivities();
+  }, [token, toast]);
 
   const handleStartActivity = (activityId: string) => {
     navigate(`/student/activity/${activityId}`);
@@ -213,7 +266,12 @@ const StudentPortal = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {filteredActivities.length > 0 ? (
+            {isLoading ? (
+              <div className="text-center py-12">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <p className="mt-2 text-sm text-muted-foreground">Loading activities...</p>
+              </div>
+            ) : filteredActivities.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredActivities.map((activity) => (
                   <ActivityCard

@@ -11,6 +11,7 @@ export interface Activity {
   difficulty: 'Easy' | 'Medium' | 'Hard';
   problemStatement: string;
   createdAt: string;
+  userId?: string; // ID of the teacher who created the activity
 }
 
 interface ActivityCardProps {
