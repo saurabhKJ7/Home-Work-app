@@ -1,5 +1,6 @@
 import os
 import json 
+import re
 from typing import Dict, Any, List
 from langchain_anthropic import ChatAnthropic
 from langchain.chains import LLMChain
@@ -53,6 +54,7 @@ def init_langsmith():
 
 
 
+
 def create_code_generation_chain(llm, rag_data):
     """
     Create a chain to generate a JavaScript function based on a user query.
@@ -60,18 +62,17 @@ def create_code_generation_chain(llm, rag_data):
     Given a new user prompt, generate the appropriate JS function code.
     """
     template = """
-You are an expert JavaScript developer.
+You are a code generation system that ONLY outputs JavaScript code.
+Your entire response will be executed directly as JavaScript code.
+DO NOT include ANY explanations, markdown formatting, or anything that is not valid JavaScript.
 
-Below are examples of user prompts and the corresponding JavaScript function code:
-
+Examples:
 {rag_data}
 
-Now, given the following user prompt, generate the JavaScript function code that fulfills the request.
+Task:
+Write a JavaScript function that fulfills this request: {user_prompt}
 
-USER PROMPT:
-{user_prompt}
-
-Return only the JavaScript function code.
+Output a valid JavaScript function:
 """
     prompt = PromptTemplate(
         template=template,
@@ -87,14 +88,28 @@ Return only the JavaScript function code.
 
 def get_evaluate_function(rag_data, user_prompt: str) -> str:
     """Generate JS function code as a plain string based on RAG and prompt."""
-    chain = create_code_generation_chain(init_anthropic_model(), rag_data)
-    result = chain.invoke({"rag_data": rag_data, "user_prompt": user_prompt})
-    # LangChain may return dict or string depending on Runnable; normalize to string
+    llm = init_anthropic_model()
+    chain = create_code_generation_chain(llm, rag_data)
+    # Convert rag_data to string representation
+    rag_data_str = ""
+    for item in rag_data:
+        rag_data_str += f"Prompt: {item['prompt']}\nCode: {item['code']}\n\n"
+    result = chain.invoke({"rag_data": rag_data_str, "user_prompt": user_prompt})
+    
+    # Extract the text from the result
     if isinstance(result, dict):
-        # common keys: 'text' or 'content'
         text = result.get("text") or result.get("content") or ""
-        return str(text)
-    return str(result)
+    else:
+        text = str(result)
+    
+    # Clean the output if needed
+    text = text.strip()
+    
+    # If the model still added markdown formatting, remove it
+    if text.startswith("```") and text.endswith("```"):
+        text = re.sub(r'```(?:javascript|js)?([\s\S]*?)```', r'\1', text).strip()
+    
+    return text
 
     
 
@@ -171,8 +186,8 @@ Return a JSON with:
 
 
 if __name__ == "__main__":
-    llm= init_anthropic_model()
-    rag_data=[{'prompt':'What is the sum of two numbers?', 'code': 'function sum(a, b) { return a + b; }'}]
+    llm = init_anthropic_model()
+    rag_data = [{'prompt':'What is the sum of two numbers?', 'code': 'function sum(a, b) { return a + b; }'}]
     user_prompt = "Write a function to calculate the product of two numbers."
     result = get_evaluate_function(rag_data, user_prompt)    
     print(result)
