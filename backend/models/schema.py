@@ -33,6 +33,7 @@ class GenerateCodeRequest(BaseModel):
 
 class GenerateCodeResponse(BaseModel):
     code: str
+    question: str = ""
 
 
 class FeedbackRequest(BaseModel):

@@ -188,10 +188,12 @@ async def generate_code(payload: GenerateCodeRequest):
             meta = getattr(m, "metadata", None) or {}
             rag_data.append({
                 "prompt": meta.get("text") or meta.get("prompt") or "",
+                "question": meta.get("question") or "",
                 "code": meta.get("code") or "",
             })
-        code = get_evaluate_function(rag_data, payload.user_query)
-        return {"code": code}
+        result = get_evaluate_function(rag_data, payload.user_query)
+        # Return both question and code
+        return {"code": result.get("code", ""), "question": result.get("question", "")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
