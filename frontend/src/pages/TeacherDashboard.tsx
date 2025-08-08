@@ -98,21 +98,32 @@ const TeacherDashboard = () => {
     }
 
     setIsGenerating(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      setPreviewActivity({
+    try {
+      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000";
+      const res = await fetch(`${baseUrl}/generate-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_query: formData.problemStatement || formData.title }),
+      });
+      if (!res.ok) throw new Error(`Failed: ${res.status}`);
+      const data = await res.json();
+      const validationFunction = data?.code || "";
+      const newPreview = {
         ...formData,
         id: Date.now().toString(),
         createdAt: new Date().toISOString(),
-        content: mockGeneratedContent
-      });
+        // keep current mock UI content for demo, attach generated code
+        content: { ...mockGeneratedContent, validationFunction },
+      };
+      setPreviewActivity(newPreview);
+      // Save to localStorage so ActivityDetail can retrieve generated function by id if needed
+      try { localStorage.setItem(`activity:${newPreview.id}:code`, validationFunction); } catch {}
+      toast({ title: "Activity Generated!", description: "Review it in the preview area." });
+    } catch (e: any) {
+      toast({ title: "Generation failed", description: e?.message || "Backend error", variant: "destructive" });
+    } finally {
       setIsGenerating(false);
-      toast({
-        title: "Activity Generated!",
-        description: "Your activity has been generated successfully. Review it in the preview area."
-      });
-    }, 2000);
+    }
   };
 
   const handlePublishActivity = () => {

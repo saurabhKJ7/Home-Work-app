@@ -1,16 +1,20 @@
-langchain
-langchain-anthropic
-langchain-openai
-langsmith
 fastapi
 uvicorn
-pinecone
 python-dotenv
-pandas 
-langchain-community
+
+# LangChain and providers
+langchain
+langchain-openai
+langchain-anthropic
+
+# Vector + embeddings
 pinecone
-openpyxl
 sentence-transformers
-langchain-community
+
+# Data tools (optional)
+pandas
+openpyxl
+
+# Observability (optional)
 langsmith
 anthropic

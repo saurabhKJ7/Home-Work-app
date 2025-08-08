@@ -43,9 +43,8 @@ def init_langsmith():
     if not api_key:
         return None
     
-    return LangSmithTracer(
-        project_name="educational-rag-system"
-    )
+    # LangSmith tracer optional; not used currently
+    return None
 
 
 
@@ -82,17 +81,22 @@ Return only the JavaScript function code.
 
 
 
-def get_evulate_function(rag_data,user_prompt: str):
-    """Evaluate a function against test cases"""
-    
-    llmchain= create_code_generation_chain(init_anthropic_model(), rag_data)
-    return llmchain.invoke({"rag_data": rag_data, "user_prompt": user_prompt})
+def get_evaluate_function(rag_data, user_prompt: str) -> str:
+    """Generate JS function code as a plain string based on RAG and prompt."""
+    chain = create_code_generation_chain(init_anthropic_model(), rag_data)
+    result = chain.invoke({"rag_data": rag_data, "user_prompt": user_prompt})
+    # LangChain may return dict or string depending on Runnable; normalize to string
+    if isinstance(result, dict):
+        # common keys: 'text' or 'content'
+        text = result.get("text") or result.get("content") or ""
+        return str(text)
+    return str(result)
 
     
 
 
 
-def feedback_function(original_prompt, generated_function, test_cases, expected_outcomes):
+def feedback_function(original_prompt: str, generated_function: str, test_cases, expected_outcomes):
     """
     Use LLM to provide feedback on the generated function based on the original prompt, test cases, and expected outcomes.
     """
@@ -134,14 +138,27 @@ Return a JSON with:
         "generated_function": generated_function,
         "test_cases_and_outcomes": test_cases_text
     })
+    # Normalize and parse JSON from model output
+    parsed = None
+    if isinstance(result, dict):
+        text = result.get("text") or result.get("content") or ""
+    else:
+        text = str(result)
     try:
-        return json.loads(result)
+        parsed = json.loads(text)
     except Exception:
+        parsed = None
+    if isinstance(parsed, dict):
         return {
-            "is_correct": False,
-            "feedback": "Unable to evaluate the function automatically.",
-            "confidence_score": 0.0
+            "is_correct": bool(parsed.get("is_correct", False)),
+            "feedback": str(parsed.get("feedback", "")),
+            "confidence_score": float(parsed.get("confidence_score", 0.0)),
         }
+    return {
+        "is_correct": False,
+        "feedback": "Unable to evaluate the function automatically.",
+        "confidence_score": 0.0,
+    }
     
 
 
@@ -153,7 +170,7 @@ if __name__ == "__main__":
     llm= init_anthropic_model()
     rag_data=[{'prompt':'What is the sum of two numbers?', 'code': 'function sum(a, b) { return a + b; }'}]
     user_prompt = "Write a function to calculate the product of two numbers."
-    result = get_evulate_function(rag_data, user_prompt)    
+    result = get_evaluate_function(rag_data, user_prompt)    
     print(result)
 
     # llm=init_openai_model()

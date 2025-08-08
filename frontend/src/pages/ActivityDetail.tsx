@@ -130,7 +130,7 @@ const ActivityDetail = () => {
     return { correct: 0, total: 0, percentage: 0 };
   };
 
-  const handleSubmit = (answers: any) => {
+  const handleSubmit = async (answers: any) => {
     const endTime = new Date();
     const timeSpent = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
     
@@ -151,6 +151,29 @@ const ActivityDetail = () => {
                 score.percentage >= 60 ? 'Good effort!' : 
                 'Keep practicing!'
     };
+
+    // Try backend feedback
+    try {
+      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000";
+      const generated_function = (() => {
+        try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" }
+      })();
+      const res = await fetch(`${baseUrl}/feedback-answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_query: activity.problemStatement,
+          generated_function,
+          submission: answers,
+          activity_type: activity.type,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        result.feedback = data?.feedback || result.feedback;
+        (result as any).confidence = data?.confidence_score;
+      }
+    } catch {}
 
     setSubmissionResult(result);
     setIsSubmitted(true);
