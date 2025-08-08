@@ -26,6 +26,12 @@
   - Standardize SDK usage to current `pinecone` client; read `PINECONE_INDEX` from env
   - Map Pinecone matches to RAG examples format expected by the prompt
   - Guard retrieval with try/except and graceful empty result fallback
+
+### Database integration
+
+- ✅ Add Postgres dependency and SQLAlchemy models (`Activity`, `Attempt`)
+- ✅ Create DB session and Base setup
+- ✅ Add CRUD endpoints for activities and attempts
 - ✅ Fill `backend/src/prompt_templates.py` or centralize prompts in one place
 - ✅ Configure CORS origins, methods, headers explicitly (GET, POST, OPTIONS)
 

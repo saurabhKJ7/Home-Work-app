@@ -11,6 +11,10 @@ langchain-anthropic
 pinecone
 sentence-transformers
 
+# Database
+SQLAlchemy
+psycopg2-binary
+
 # Data tools (optional)
 pandas
 openpyxl
