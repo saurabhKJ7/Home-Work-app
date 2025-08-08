@@ -9,7 +9,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-
+LANGSMITH_TRACING="true"
+LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
+LANGSMITH_API_KEY="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"
+LANGSMITH_PROJECT="Home-Work"
+OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY")
 
 def init_anthropic_model():
     """Initialize Anthropic model"""
