@@ -1,4 +1,3 @@
-
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +15,9 @@ from models.schema import (
     ActivityRead,
     AttemptCreate,
     AttemptRead,
+    ValidationRequest,
+    ValidationResponse,
+    MetaValidationRequest,
 )
 from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser
 from utils.db import get_db, Base, engine
@@ -25,8 +27,10 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from pydantic import BaseModel as PBase
-from src.llm_chain import get_evaluate_function, feedback_function
+from src.llm_chain import get_evaluate_function
 from src.retrieval import retrieve_similar_examples, get_embeddings
+from src.validation_pipeline import run_validation_pipeline, validate_student_submission
+from src.improved_rag import get_enhanced_rag_data
 
 load_dotenv()
 
@@ -180,20 +184,62 @@ def get_current_user_profile(user: DBUser = Depends(get_current_user)):
 @app.post("/generate-code", response_model=GenerateCodeResponse)
 async def generate_code(payload: GenerateCodeRequest):
     try:
-        query_vector = get_embeddings(payload.user_query)
-        examples = retrieve_similar_examples(query_vector)
-        # Convert pinecone matches into a simple string list for prompt context
-        rag_data = []
-        for m in examples or []:
-            meta = getattr(m, "metadata", None) or {}
-            rag_data.append({
-                "prompt": meta.get("text") or meta.get("prompt") or "",
-                "question": meta.get("question") or "",
-                "code": meta.get("code") or "",
-            })
+        # Use enhanced RAG system
+        rag_data = get_enhanced_rag_data(
+            payload.user_query, 
+            payload.type
+        )
+        
+        # Generate code using improved function
         result = get_evaluate_function(rag_data, payload.user_query)
+        
         # Return both question and code
-        return {"code": result.get("code", ""), "question": result.get("question", "")}
+        return {"code": result.code, "question": result.question}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/validate-function", response_model=ValidationResponse)
+async def validate_function_endpoint(payload: ValidationRequest):
+    try:
+        # Get activity from database to get validation function
+        db = next(get_db())
+        activity = db.query(DBActivity).filter(DBActivity.id == payload.activity_id).first()
+        
+        if not activity:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        
+        # Validate submission
+        result = validate_student_submission(
+            activity.validation_function,
+            payload.student_response,
+            activity.type,
+            payload.attempt_number
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/meta-validate", response_model=dict)
+async def meta_validate_function(payload: MetaValidationRequest):
+    try:
+        # Run validation pipeline
+        result = run_validation_pipeline(
+            payload.activity_description,
+            payload.validation_type,
+            payload.expected_answers
+        )
+        
+        return {
+            "validation_function": result["validation_function"],
+            "feedback_function": result["feedback_function"],
+            "is_reliable": result["is_reliable"],
+            "accuracy_score": result["validation_results"]["accuracy_score"],
+            "confidence_level": result["validation_results"]["confidence_level"],
+            "improvement_suggestions": result["validation_results"]["improvement_suggestions"]
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -201,12 +247,16 @@ async def generate_code(payload: GenerateCodeRequest):
 @app.post("/feedback-answer", response_model=FeedbackResponse)
 async def feedback_answer(payload: FeedbackRequest):
     try:
+        from src.llm_chain import feedback_function
+        
         # Minimal placeholder until submission→testcases mapping is formalized
-        test_cases: List[str] = [str(payload.submission)]
-        expected_outcomes: List[str] = ["evaluate based on generated function"]
+        test_cases: List[dict] = [{"submission": payload.submission}]
+        expected_outcomes: List[bool] = [True]  # Assume correct for testing
+        
         result = feedback_function(
             payload.user_query, payload.generated_function, test_cases, expected_outcomes
         )
+        
         return FeedbackResponse(
             is_correct=bool(result.get("is_correct", False)),
             feedback=str(result.get("feedback", "")),

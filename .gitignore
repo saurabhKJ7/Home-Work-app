@@ -3,3 +3,17 @@ myenv
 myenv/
 node_modules/
 node_modules
+.cursor
+.cursor/
+_pycache_
+_pycache_/
+__pycache__
+__pycache__/
+.vscode
+.vscode/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.benchmarks
+.benchmarks/

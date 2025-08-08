@@ -11,10 +11,9 @@ from e2b import Sandbox
 load_dotenv()
 
 from pydantic import BaseModel, Field
-class StructuredOutputNumerical(BaseModel):
+class StructuredOutput(BaseModel):
     question: str = Field(description="The specific math problem to solve with concrete values")
     code: str = Field(description="function calculateAnswer(input) { // JavaScript code that solves this specific problem }")
-    answer: str = Field(description="The numerical answer to the question, calculated by the code")
 
 
 LANGSMITH_TRACING="true"
@@ -75,21 +74,21 @@ def evaluate_code(code):
 
 
 
-# ...existing code...
 from langchain.output_parsers import PydanticOutputParser
 
-def get_evaluate_function(llm, rag_data, user_prompt):
+def get_evaluate_function(rag_data, user_prompt):
     """
     Create a chain to generate both a question and JavaScript function based on a user query.
     The RAG data contains previous user prompts and their respective JS function code.
     Given a new user prompt, generate the appropriate question and JS function code.
     Returns a Pydantic structured output.
     """
+    llm = init_openai_model()
     rag_data_str = ""
     for item in rag_data:
-        rag_data_str += f"Question: {item.get('question', '')}\nCode: {item['code']}\n\n"
+        rag_data_str += f"Question: {item.get('question', '')}\nCode: {item.get('code', '')}\n\n"
 
-    parser = PydanticOutputParser(pydantic_object=StructuredOutputNumerical)
+    parser = PydanticOutputParser(pydantic_object=StructuredOutput)
     format_instructions = parser.get_format_instructions()
 
     template = """
@@ -99,7 +98,7 @@ Your output must be in the following JSON format:
 {format_instructions}
 
 Examples:
-{rag_data}
+{rag_data_str}
 
 Task:
 Create a specific math problem (not a coding task) and JavaScript function that fulfills this request: {user_prompt}
@@ -122,12 +121,52 @@ Ensure your output ONLY contains the JSON object as shown above.
 """
     prompt = PromptTemplate(
         template=template,
-        input_variables=["rag_data", "user_prompt", "format_instructions"]
+        input_variables=["rag_data_str", "user_prompt", "format_instructions"]
     )
     chain = LLMChain(llm=llm, prompt=prompt, output_parser=parser)
-    return chain
+    result = chain.invoke({
+        "rag_data_str": rag_data_str,
+        "user_prompt": user_prompt,
+        "format_instructions": format_instructions
+    })
+    return result["text"]
 
-# ...existing code...
+
+def feedback_function(original_prompt, generated_function, test_cases, expected_outcomes):
+    """
+    Generate feedback for a validation function
+    
+    Args:
+        original_prompt: The original problem statement
+        generated_function: The JavaScript validation function
+        test_cases: List of test inputs
+        expected_outcomes: List of expected outcomes
+        
+    Returns:
+        Dictionary with feedback results
+    """
+    from backend.src.meta_validation import validate_function
+    
+    # Validate the function
+    validation_results = validate_function(
+        original_prompt, generated_function, test_cases, expected_outcomes
+    )
+    
+    # Generate feedback based on validation results
+    is_correct = validation_results["accuracy_score"] > 0.8
+    confidence_score = validation_results["accuracy_score"]
+    
+    feedback = "The function appears to be correct." if is_correct else "The function has issues."
+    
+    if validation_results["improvement_suggestions"]:
+        feedback += " " + " ".join(validation_results["improvement_suggestions"])
+    
+    return {
+        "is_correct": is_correct,
+        "feedback": feedback,
+        "confidence_score": confidence_score
+    }
+
 
 if __name__ == "__main__":
     llm = init_openai_model()
@@ -136,19 +175,12 @@ if __name__ == "__main__":
         {"question": "What is the value of matrix multiplication of [[1,2],[2,3]] and [[3,8],[5,9]]?", "code": "function calculateAnswer() { return [[1,2],[2,3]] * [[3,8],[5,9]]; } console.log(calculateAnswer());"},
         {"question": "If a triangle has sides of length 3, 4, and 5, what is its area?", "code": "function calculateAnswer() { return 3 * 4 * 5; } console.log(calculateAnswer());"}
     ]
-    user_prompt = "make a  math problem related to calculation area of traingle"
-    chain = get_evaluate_function(llm, rag_data, user_prompt)
-    result = chain.invoke({
-        "rag_data": rag_data,
-        "user_prompt": user_prompt,
-        "format_instructions": PydanticOutputParser(pydantic_object=StructuredOutputNumerical).get_format_instructions()
-    })
-    print(f"\nQuestion: {result['text'].question}")
-    print(f"Answer Code: {result['text'].code}")
-    print(f"Expected Answer: {result['text'].answer}")
+    user_prompt = "What is the product of 14 and 23?"
+    result = get_evaluate_function(rag_data, user_prompt)
+    print(f"\nQuestion: {result.question}")
+    print(f"Answer Code: {result.code}")
     
     # Execute the code to get the answer
     print("\nExecuting code...")
-    output = evaluate_code(result['text'].code)
+    output = evaluate_code(result.code)
     print(f"Result: {output}")
-# ...existing code...
