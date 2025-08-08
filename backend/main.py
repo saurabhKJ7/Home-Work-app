@@ -202,21 +202,33 @@ async def generate_code(payload: GenerateCodeRequest):
 @app.post("/validate-function", response_model=ValidationResponse)
 async def validate_function_endpoint(payload: ValidationRequest):
     try:
-        # Get activity from database to get validation function
+        # Always fetch the latest validation_function from DB by activity_id
         db = next(get_db())
         activity = db.query(DBActivity).filter(DBActivity.id == payload.activity_id).first()
-        
         if not activity:
             raise HTTPException(status_code=404, detail="Activity not found")
-        
-        # Validate submission
+
+        if not activity.validation_function:
+            # Attempt on-the-fly generation if missing
+            try:
+                pipeline = run_validation_pipeline(
+                    activity.problem_statement,
+                    activity.type,
+                    []
+                )
+                activity.validation_function = pipeline.get("validation_function", "")
+                db.add(activity)
+                db.commit()
+            except Exception as gen_err:
+                print(f"[validate-function] generation failed: {gen_err}")
+
+        # Validate submission using DB-stored code
         result = validate_student_submission(
-            activity.validation_function,
+            activity.validation_function or "",
             payload.student_response,
             activity.type,
             payload.attempt_number
         )
-        
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -270,6 +282,20 @@ async def feedback_answer(payload: FeedbackRequest):
 
 @app.post("/activities", response_model=ActivityRead)
 def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user: DBUser = Depends(require_role("teacher"))):
+    # Ensure a proper validation_function exists. If not provided, generate one via the validation pipeline.
+    validation_function = payload.validation_function or ""
+    try:
+        if not validation_function:
+            pipeline_result = run_validation_pipeline(
+                payload.problem_statement,
+                payload.type,
+                payload.correct_answers or []
+            )
+            validation_function = pipeline_result.get("validation_function", "")
+    except Exception as e:
+        # If generation fails, proceed with empty function but allow creation; clients can retry meta-validate later
+        print(f"[activities/create] validation function generation failed: {e}")
+
     activity = DBActivity(
         user_id=user.id,  # Add user_id from the authenticated teacher
         title=payload.title,
@@ -278,7 +304,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
         difficulty=payload.difficulty,
         problem_statement=payload.problem_statement,
         ui_config=payload.ui_config,
-        validation_function=payload.validation_function,
+        validation_function=validation_function,
         correct_answers=payload.correct_answers,
     )
     db.add(activity)

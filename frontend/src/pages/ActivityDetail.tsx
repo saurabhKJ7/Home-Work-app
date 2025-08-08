@@ -223,25 +223,28 @@ const ActivityDetail = () => {
     const endTime = new Date();
     const timeSpent = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
     
+    // Always validate against DB validation_function via backend
     let score;
+    let backendValidation: { is_correct: boolean; feedback: string; confidence_score: number } | null = null;
     try {
-      if (activity.type === 'Grid-based') {
-        // Use backend validation when correct answer is not available
-        if (!activity.content?.answer) {
-          const backendValidation = await validateSubmission(id, answers, token);
-          const percentage = backendValidation.is_correct ? 100 : 0;
-          score = { correct: backendValidation.is_correct ? 1 : 0, total: 1, percentage };
-        } else {
-          score = calculateScore(answers, activity.content.answer, activity.type);
-        }
-      } else if (activity.type === 'Mathematical') {
-        score = calculateScore(answers, activity.content.math, activity.type);
-      } else {
-        score = calculateScore(answers, activity.content.logic, activity.type);
-      }
+      backendValidation = await validateSubmission(id, answers, token);
+      const percentage = backendValidation.is_correct ? 100 : 0;
+      score = { correct: backendValidation.is_correct ? 1 : 0, total: 1, percentage };
     } catch (e) {
-      // Fallback scoring if validation API fails
-      score = { correct: 0, total: 0, percentage: 0 };
+      // Fallback: attempt client-side scoring if content includes correct answers
+      try {
+        if (activity.type === 'Grid-based' && activity.content?.answer) {
+          score = calculateScore(answers, activity.content.answer, activity.type);
+        } else if (activity.type === 'Mathematical' && activity.content?.math) {
+          score = calculateScore(answers, activity.content.math, activity.type);
+        } else if (activity.type === 'Logical' && activity.content?.logic) {
+          score = calculateScore(answers, activity.content.logic, activity.type);
+        } else {
+          score = { correct: 0, total: 0, percentage: 0 };
+        }
+      } catch {
+        score = { correct: 0, total: 0, percentage: 0 };
+      }
     }
 
     const result = {
@@ -260,25 +263,29 @@ const ActivityDetail = () => {
         time_spent_seconds: timeSpent
       }, token);
       
-      // Try backend feedback
-      try {
-        // Prefer validation function from backend activity; fallback to any temp local preview storage
-        const generated_function = activity.validation_function && activity.validation_function.length > 0
-          ? activity.validation_function
-          : (() => { try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" } })();
-        const feedbackResponse = await postJson("/feedback-answer", {
-          user_query: activity.problemStatement,
-          generated_function,
-          submission: answers,
-          activity_type: activity.type,
-        }, token);
-        
-        if (feedbackResponse) {
-          result.feedback = feedbackResponse?.feedback || result.feedback;
-          (result as any).confidence = feedbackResponse?.confidence_score;
+      // Prefer feedback from validation endpoint when available
+      if (backendValidation) {
+        result.feedback = backendValidation.feedback || result.feedback;
+        (result as any).confidence = backendValidation.confidence_score;
+      } else {
+        // Optional: keep legacy feedback endpoint as a fallback
+        try {
+          const generated_function = activity.validation_function && activity.validation_function.length > 0
+            ? activity.validation_function
+            : (() => { try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" } })();
+          const feedbackResponse = await postJson("/feedback-answer", {
+            user_query: activity.problemStatement,
+            generated_function,
+            submission: answers,
+            activity_type: activity.type,
+          }, token);
+          if (feedbackResponse) {
+            result.feedback = feedbackResponse?.feedback || result.feedback;
+            (result as any).confidence = feedbackResponse?.confidence_score;
+          }
+        } catch (error) {
+          console.error('Error getting feedback:', error);
         }
-      } catch (error) {
-        console.error('Error getting feedback:', error);
       }
     } catch (error) {
       console.error('Error submitting attempt:', error);
