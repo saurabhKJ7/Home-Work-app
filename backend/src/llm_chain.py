@@ -52,41 +52,6 @@ def init_langsmith():
     # LangSmith tracer optional; not used currently
     return None
 
-# def evaluate_code():
-#     import time
-#     initial_time = time.time()
-#     try:
-#         E2B_API_KEY = os.environ.get("E2B_API_KEY")
-#         if not E2B_API_KEY:
-#             raise ValueError("E2B_API_KEY must be set in the environment variables.")
-
-#         code = 'function calculateAnswer() { return 14 * 23; } console.log(calculateAnswer());'
-#         print("second code")
-#         print(code)
-#         if code and any(js_hint in code for js_hint in ["console.log", "function", "const ", "let ", "var ", "=>"]):
-#             try:
-#                 with Sandbox(template="base", api_key=E2B_API_KEY) as sandbox:
-#                     sandbox.files.write("script.js", code)
-#                     execution = sandbox.commands.run("node script.js")
-#                     result = execution.stdout if execution.exit_code == 0 else execution.stderr
-#                     if not result or not result.strip():
-#                         result = "(no output) Ensure your JavaScript prints with console.log(...)"
-#             except Exception as e:
-#                 error_text = str(e)
-#                 if "401" in error_text or "Invalid API key" in error_text:
-#                     raise RuntimeError(
-#                         "E2B authentication failed (401). Your E2B_API_KEY is invalid or expired. "
-#                         "Generate a new key at https://e2b.dev/docs/api-key and update your .env"
-#                     ) from e
-#                 raise
-#             print("--- JavaScript Execution Result ---")
-#             print(result)
-#             final_time = time.time()
-#             print(f"Execution time: {final_time - initial_time:.2f} seconds")
-#         else:
-#             print("Skipping execution because the generated code does not look like Python or JavaScript.")
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
 
 
 from e2b import Sandbox
@@ -153,7 +118,16 @@ Do NOT include any function wrappers, JSON formatting, or any other content.
 
 
 
-    
+def feedback_function(user_response,generated_function):
+    """
+    Generate feedback on a generated function based on test cases and expected outcomes.
+    """
+    response=str(evaluate_code(generated_function))
+    user_response = str(user_response)
+    if response==user_response:
+        return "The generated function works correctly."
+    else:
+        return f"The generated function did not produce the expected result. Expected: {user_response}, Got: {response}"
 
 
 
@@ -162,30 +136,5 @@ Do NOT include any function wrappers, JSON formatting, or any other content.
 
 if __name__ == "__main__":
     code='function calculateAnswer() { return 14 * 23; } console.log(calculateAnswer());'
-    result = evaluate_code(code)
+    result = feedback_function(322, code)
     print(result)
-
-    # llm = init_anthropic_model()
-    # rag_data = [
-    #     {
-    #         'prompt': 'Give me assignment on sum of numbers',
-    #         'question': 'What is the sum of 5 and 7?',
-    #         'code': 'function sum(a, b) { return a + b; }'
-    #     }
-    # ]
-    # user_prompt = "Give me assignment on product of numbers"
-    # chain = get_evaluate_function(llm, rag_data)
-    # result = chain.invoke({"rag_data": "\n".join([f"Prompt: {item['prompt']}\nQuestion: {item.get('question', '')}\nCode: {item['code']}" for item in rag_data]), "user_prompt": user_prompt})
-    # print(result)
-
-    # llm=init_openai_model()
-    # original_prompt='generate a function that takes two numbers and returns their sum'
-    # generated_function='function sum(a, b) { return a + b; }'
-    # test_cases= [
-    #     {"input": [1, 2], "expected": 3},
-    #     {"input": [5, 7], "expected": 12},
-    #     {"input": [-1, -1], "expected": -2}
-    # ]
-    # expected_outcomes= [3, 12, -2]
-    # feedback = feedback_function(original_prompt, generated_function, test_cases, expected_outcomes)
-    # print(feedback)
