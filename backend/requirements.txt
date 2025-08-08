@@ -26,3 +26,4 @@ openpyxl
 # Observability (optional)
 langsmith
 anthropic
+e2b

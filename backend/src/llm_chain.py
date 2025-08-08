@@ -10,10 +10,15 @@ from dotenv import load_dotenv
 from e2b import Sandbox
 load_dotenv()
 
+from pydantic import BaseModel, Field
+class StructuredOutput(BaseModel):
+    question: str = Field(description="The specific math problem to solve with concrete values")
+    code: str = Field(description="function calculateAnswer(input) { // JavaScript code that solves this specific problem }")
+
 
 LANGSMITH_TRACING="true"
 LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
-LANGSMITH_API_KEY="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"
+LANGSMITH_API_KEY=os.getenv("LANGSMITH_API_KEY")
 LANGSMITH_PROJECT="Home-Work"
 OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY")
 
@@ -69,22 +74,28 @@ def evaluate_code(code):
 
 
 
+# ...existing code...
+from langchain.output_parsers import PydanticOutputParser
 
-
-def get_evaluate_function(llm, rag_data):
+def get_evaluate_function(llm, rag_data, user_prompt):
     """
     Create a chain to generate both a question and JavaScript function based on a user query.
     The RAG data contains previous user prompts and their respective JS function code.
     Given a new user prompt, generate the appropriate question and JS function code.
+    Returns a Pydantic structured output.
     """
     rag_data_str = ""
     for item in rag_data:
-        rag_data_str += f"Prompt: {item['prompt']}\nQuestion: {item.get('question', '')}\nCode: {item['code']}\n\n"
+        rag_data_str += f"Question: {item.get('question', '')}\nCode: {item['code']}\n\n"
+
+    parser = PydanticOutputParser(pydantic_object=StructuredOutput)
+    format_instructions = parser.get_format_instructions()
 
     template = """
 You are an educational content generation system that creates math problems and their solution code.
-Your output must be in a specific format that will be parsed by the system.
-DO NOT include ANY explanations, markdown formatting, or anything outside the specified format.
+Your output must be in the following JSON format:
+
+{format_instructions}
 
 Examples:
 {rag_data}
@@ -104,37 +115,38 @@ BAD EXAMPLES:
 - "Create a function to calculate the area of a triangle"
 
 Output format:
-question: "The specific math problem to solve with concrete values"
-code: "function calculateAnswer(input) {{ // JavaScript code that solves this specific problem }}"
+{format_instructions}
 
-Ensure your output ONLY contains the question and code lines exactly as shown above.
-Do NOT include any function wrappers, JSON formatting, or any other content.
+Ensure your output ONLY contains the JSON object as shown above.
 """
     prompt = PromptTemplate(
         template=template,
-        input_variables=["rag_data", "user_prompt"]
+        input_variables=["rag_data", "user_prompt", "format_instructions"]
     )
-    return LLMChain(llm=llm, prompt=prompt)
+    chain = LLMChain(llm=llm, prompt=prompt, output_parser=parser)
+    return chain
 
-
-
-def feedback_function(user_response,generated_function):
-    """
-    Generate feedback on a generated function based on test cases and expected outcomes.
-    """
-    response=str(evaluate_code(generated_function))
-    user_response = str(user_response)
-    if response==user_response:
-        return "The generated function works correctly."
-    else:
-        return f"The generated function did not produce the expected result. Expected: {user_response}, Got: {response}"
-
-
-
-
-
+# ...existing code...
 
 if __name__ == "__main__":
-    code='function calculateAnswer() { return 14 * 23; } console.log(calculateAnswer());'
-    result = feedback_function(322, code)
-    print(result)
+    llm = init_openai_model()
+    rag_data = [
+        {"question": "What is the product of 8 and 12?", "code": "function calculateAnswer() { return 8 * 12; } console.log(calculateAnswer());"},
+        {"question": "What is the value of matrix multiplication of [[1,2],[2,3]] and [[3,8],[5,9]]?", "code": "function calculateAnswer() { return [[1,2],[2,3]] * [[3,8],[5,9]]; } console.log(calculateAnswer());"},
+        {"question": "If a triangle has sides of length 3, 4, and 5, what is its area?", "code": "function calculateAnswer() { return 3 * 4 * 5; } console.log(calculateAnswer());"}
+    ]
+    user_prompt = "What is the product of 14 and 23?"
+    chain = get_evaluate_function(llm, rag_data, user_prompt)
+    result = chain.invoke({
+        "rag_data": rag_data,
+        "user_prompt": user_prompt,
+        "format_instructions": PydanticOutputParser(pydantic_object=StructuredOutput).get_format_instructions()
+    })
+    print(f"\nQuestion: {result['text'].question}")
+    print(f"Answer Code: {result['text'].code}")
+    
+    # Execute the code to get the answer
+    print("\nExecuting code...")
+    output = evaluate_code(result['text'].code)
+    print(f"Result: {output}")
+# ...existing code...
