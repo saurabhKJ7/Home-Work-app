@@ -11,9 +11,10 @@ from e2b import Sandbox
 load_dotenv()
 
 from pydantic import BaseModel, Field
-class StructuredOutput(BaseModel):
+class StructuredOutputNumerical(BaseModel):
     question: str = Field(description="The specific math problem to solve with concrete values")
     code: str = Field(description="function calculateAnswer(input) { // JavaScript code that solves this specific problem }")
+    answer: str = Field(description="The numerical answer to the question, calculated by the code")
 
 
 LANGSMITH_TRACING="true"
@@ -88,7 +89,7 @@ def get_evaluate_function(llm, rag_data, user_prompt):
     for item in rag_data:
         rag_data_str += f"Question: {item.get('question', '')}\nCode: {item['code']}\n\n"
 
-    parser = PydanticOutputParser(pydantic_object=StructuredOutput)
+    parser = PydanticOutputParser(pydantic_object=StructuredOutputNumerical)
     format_instructions = parser.get_format_instructions()
 
     template = """
@@ -135,15 +136,16 @@ if __name__ == "__main__":
         {"question": "What is the value of matrix multiplication of [[1,2],[2,3]] and [[3,8],[5,9]]?", "code": "function calculateAnswer() { return [[1,2],[2,3]] * [[3,8],[5,9]]; } console.log(calculateAnswer());"},
         {"question": "If a triangle has sides of length 3, 4, and 5, what is its area?", "code": "function calculateAnswer() { return 3 * 4 * 5; } console.log(calculateAnswer());"}
     ]
-    user_prompt = "What is the product of 14 and 23?"
+    user_prompt = "make a  math problem related to calculation area of traingle"
     chain = get_evaluate_function(llm, rag_data, user_prompt)
     result = chain.invoke({
         "rag_data": rag_data,
         "user_prompt": user_prompt,
-        "format_instructions": PydanticOutputParser(pydantic_object=StructuredOutput).get_format_instructions()
+        "format_instructions": PydanticOutputParser(pydantic_object=StructuredOutputNumerical).get_format_instructions()
     })
     print(f"\nQuestion: {result['text'].question}")
     print(f"Answer Code: {result['text'].code}")
+    print(f"Expected Answer: {result['text'].answer}")
     
     # Execute the code to get the answer
     print("\nExecuting code...")
