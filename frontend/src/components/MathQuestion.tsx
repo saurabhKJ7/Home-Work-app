@@ -18,12 +18,13 @@ interface MathQuestionProps {
   onSubmit: (answers: { [key: string]: number }) => void;
   isReadOnly?: boolean;
   showResults?: boolean;
+  showTests?: boolean;
   userAnswers?: { [key: string]: number };
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
 }
 
-const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {} }: MathQuestionProps) => {
+const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {} }: MathQuestionProps) => {
   const [answers, setAnswers] = useState<{ [key: string]: number }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string) => {
@@ -81,12 +82,12 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
                 />
 
               </div>
-              {showResults && (
+              {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">
                   Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? (problem.validation_tests?.length || 0)}
                 </div>
               )}
-              {showResults && perQuestionTestDetails[problem.id] && (
+              {showResults && showTests && perQuestionTestDetails[problem.id] && (
                 <div className="mt-2 border rounded-md p-2 bg-muted/30">
                   <div className="text-xs font-medium mb-1">Test details</div>
                   <ul className="space-y-1 text-xs">

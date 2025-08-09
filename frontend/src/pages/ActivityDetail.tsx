@@ -539,7 +539,7 @@ const ActivityDetail = () => {
 
       toast({
         title: "Assignment Submitted!",
-        description: `You scored ${result.score.percentage}% - ${result.feedback} ${typeof result.testsPassed === 'number' ? `(Tests passed: ${result.testsPassed}/${result.totalTests})` : ''}`,
+        description: `You scored ${result.score.percentage}% - ${result.feedback}`,
         variant: result.score.percentage >= 60 ? "default" : "destructive"
       });
       
@@ -735,6 +735,7 @@ const ActivityDetail = () => {
                 onSubmit={handleSubmit}
                 isReadOnly={isSubmitted}
                 showResults={isSubmitted}
+                showTests={false}
                 userAnswers={submissionResult?.userAnswers}
                 perQuestionTests={submissionResult?.perQuestionTests}
                 perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
@@ -747,6 +748,7 @@ const ActivityDetail = () => {
                 onSubmit={handleSubmit}
                 isReadOnly={isSubmitted}
                 showResults={isSubmitted}
+                showTests={false}
                 userAnswers={submissionResult?.userAnswers}
                 perQuestionTests={submissionResult?.perQuestionTests}
                 perQuestionTestDetails={submissionResult?.perQuestionTestDetails}

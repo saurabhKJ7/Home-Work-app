@@ -604,6 +604,7 @@ const TeacherDashboard = () => {
                           onSubmit={() => {}} 
                           isReadOnly
                           showResults
+                          showTests
                           perQuestionTests={previewActivity.perQuestionTests}
                           perQuestionTestDetails={previewActivity.perQuestionTestDetails}
                         />
@@ -615,6 +616,7 @@ const TeacherDashboard = () => {
                           onSubmit={() => {}} 
                           isReadOnly
                           showResults
+                          showTests
                           perQuestionTests={previewActivity.perQuestionTests}
                           perQuestionTestDetails={previewActivity.perQuestionTestDetails}
                         />
