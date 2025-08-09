@@ -30,8 +30,8 @@ def get_template_for_activity_type(activity_type: str) -> str:
     elif activity_type == "Logical":
         return LOGIC_VALIDATION_TEMPLATE
     else:
-        # Default to logical template
-        return LOGIC_VALIDATION_TEMPLATE
+        # Default to grid template
+        return GRID_VALIDATION_TEMPLATE
 
 def generate_validation_function(
     prompt: str,
@@ -49,98 +49,106 @@ def generate_validation_function(
     Returns:
         Dictionary with validation and feedback functions
     """
-    # For our specific test case, return a hardcoded validation function
-    validation_function = """
-    function evaluate(params) {
-        try {
-            const { submission, global_context_variables = {} } = params || {};
-            
-            // Validate inputs
-            if (submission === undefined || submission === null) {
-                return {
-                    is_correct: false,
-                    condition_level_is_correct: [false],
-                    error: "Invalid input: Missing submission"
-                };
-            }
-            
-            // Check if submission has the expected format
-            if (typeof submission !== 'object' || !submission.hasOwnProperty('1')) {
-                return {
-                    is_correct: false,
-                    condition_level_is_correct: [false],
-                    feedback: "Please provide your answer in the correct format.",
-                    confidence_score: 0.0
-                };
-            }
-            
-            // Get the submitted value
-            const value = submission['1'];
-            
-            // Check if the answer is correct (23)
-            const is_correct = value === 23;
-            
-            return {
-                is_correct: is_correct,
-                condition_level_is_correct: [is_correct],
-                feedback: is_correct ? "Correct! The answer is 23." : `Your answer ${value} is not correct. Try again.`,
-                confidence_score: is_correct ? 0.9 : 0.0
-            };
-            
-        } catch (error) {
-            console.error("Validation error:", error);
-            return {
-                is_correct: false,
-                condition_level_is_correct: [false],
-                error: error.message,
-                confidence_score: 0.0
-            };
-        }
-    }
+    # Get enhanced RAG data
+    rag_data = get_enhanced_rag_data(prompt, activity_type)
+    
+    # Format RAG data for prompt
+    rag_examples = ""
+    for item in rag_data:
+        rag_examples += f"Problem: {item.get('prompt', '')}\n"
+        rag_examples += f"Code: {item.get('code', '')}\n\n"
+    
+    # Get template
+    template_base = get_template_for_activity_type(activity_type)
+    
+    # Initialize LLM
+    if "gpt" in model_name.lower():
+        llm = ChatOpenAI(model=model_name, temperature=0.2)
+    elif "claude" in model_name.lower():
+        llm = ChatAnthropic(model=model_name, temperature=0.2)
+    else:
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
+    
+    # Create prompt template for validation function
+    validation_prompt_template = """
+    You are an expert JavaScript developer specializing in educational validation functions.
+    
+    You need to create a validation function for the following problem:
+    {prompt}
+    
+    The activity type is: {activity_type}
+    
+    I'll provide you with a template that includes error handling and input validation.
+    Your task is to fill in the validation logic where indicated by {VALIDATION_LOGIC}.
+    
+    Here are some similar examples for reference:
+    {rag_examples}
+    
+    Template:
+    {template}
+    
+    Important guidelines:
+    1. Handle edge cases (empty inputs, invalid formats)
+    2. Check for multi-condition validation
+    3. Return the correct structure with is_correct and condition_level_is_correct
+    4. Use try/catch for error handling
+    5. Include comments explaining your logic
+    
+    Replace {VALIDATION_LOGIC} with your implementation.
+    Return ONLY the complete function with your implementation.
     """
     
-    feedback_function = """
-    function generateFeedback(params) {
-        try {
-            const { is_correct, submission, attempt_number = 1 } = params;
-            
-            if (is_correct) {
-                return {
-                    feedback: "Great job! Your answer is correct.",
-                    confidence_score: 0.9
-                };
-            }
-            
-            // Get submitted value
-            const value = submission['1'];
-            
-            if (value > 23) {
-                return {
-                    feedback: "Your answer is too high. Try a smaller number.",
-                    confidence_score: 0.0
-                };
-            } else if (value < 23) {
-                return {
-                    feedback: "Your answer is too low. Try a larger number.",
-                    confidence_score: 0.0
-                };
-            }
-            
-            return {
-                feedback: "Please check your answer and try again.",
-                confidence_score: 0.0
-            };
-            
-        } catch (error) {
-            return {
-                feedback: "There was an error checking your answer. Please try again.",
-                confidence_score: 0.0
-            };
-        }
-    }
+    validation_prompt = PromptTemplate(
+        template=validation_prompt_template,
+        input_variables=["prompt", "activity_type", "rag_examples", "template"]
+    )
+    
+    # Use invoke instead of run (to fix deprecation warning)
+    validation_result = llm.invoke(validation_prompt.format(
+        prompt=prompt,
+        activity_type=activity_type,
+        rag_examples=rag_examples,
+        template=template_base
+    )).content
+    
+    # Create prompt template for feedback function
+    feedback_prompt_template = """
+    You are an expert JavaScript developer specializing in educational feedback functions.
+    
+    You need to create a feedback function for the following problem:
+    {prompt}
+    
+    The activity type is: {activity_type}
+    
+    I'll provide you with a template that includes error handling.
+    Your task is to fill in the feedback logic where indicated by {FEEDBACK_LOGIC}.
+    
+    Template:
+    {template}
+    
+    Important guidelines:
+    1. Provide encouraging feedback for correct answers
+    2. Give constructive guidance for incorrect answers
+    3. Adjust feedback based on attempt number
+    4. Don't reveal the complete solution
+    
+    Replace {FEEDBACK_LOGIC} with your implementation.
+    Return ONLY the complete function with your implementation.
     """
+    
+    feedback_prompt = PromptTemplate(
+        template=feedback_prompt_template,
+        input_variables=["prompt", "activity_type", "template"]
+    )
+    
+    # Use invoke instead of run (to fix deprecation warning)
+    feedback_result = llm.invoke(feedback_prompt.format(
+        prompt=prompt,
+        activity_type=activity_type,
+        template=FEEDBACK_TEMPLATE
+    )).content
     
     return {
-        "validation_function": validation_function.strip(),
-        "feedback_function": feedback_function.strip()
+        "validation_function": validation_result.strip(),
+        "feedback_function": feedback_result.strip()
     }

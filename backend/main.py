@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from models.schema import (
     GenerateCodeRequest,
     GenerateCodeResponse,
+    QuestionResponse,
     FeedbackRequest,
     FeedbackResponse,
     ActivityCreate,
@@ -19,7 +20,7 @@ from models.schema import (
     ValidationResponse,
     MetaValidationRequest,
 )
-from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser, CodeGeneration as DBCodeGen
+from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser
 from utils.db import get_db, Base, engine
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
@@ -188,28 +189,48 @@ async def generate_code(
     current_user: DBUser | None = Depends(lambda: None)
 ):
     try:
+        # Determine number of questions to generate
+        num_questions = payload.num_questions or 1
+        questions = []
+        
+        # Get the query from user_query field
+        if not payload.user_query:
+            raise HTTPException(status_code=400, detail="Missing required field: user_query")
+            
         # Use enhanced RAG system
         rag_data = get_enhanced_rag_data(
             payload.user_query, 
             payload.type
         )
         
-        # Generate code using improved function
-        result = get_evaluate_function(rag_data, payload.user_query)
+        # Generate multiple questions
+        for i in range(num_questions):
+            # Add variation to the prompt for each question to get different results
+            varied_query = payload.user_query
+            if i > 0:
+                varied_query = f"{payload.user_query} (Question {i+1} - generate a different variation)"
+            
+            # Generate code using improved function
+            result = get_evaluate_function(rag_data, varied_query)
+            
+            # Create unique question ID
+            question_id = f"q_{i+1}_{int(datetime.now().timestamp())}"
+            
+            # Add the generated question to the list
+            questions.append({
+                "code": result.code,
+                "question": result.question,
+                "question_id": question_id,
+                "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
+                "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
+                "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
+            })
         
-        # Store the generation in the database
-        code_gen = DBCodeGen(
-            user_id=current_user.id if current_user else None,
-            type=payload.type,
-            user_query=payload.user_query,
-            generated_code=result.code,
-            generated_question=result.question
-        )
-        db.add(code_gen)
-        db.commit()
-        
-        # Return both question and code
-        return {"code": result.code, "question": result.question}
+        # Return multiple questions
+        return {
+            "questions": questions,
+            "total_questions": num_questions
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -322,47 +343,193 @@ async def feedback_answer(payload: FeedbackRequest):
 
 @app.post("/activities", response_model=ActivityRead)
 def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user: DBUser = Depends(require_role("teacher"))):
-    # Ensure a proper validation_function exists. If not provided, generate one via the validation pipeline.
-    validation_function = payload.validation_function or ""
-    try:
-        if not validation_function:
-            pipeline_result = run_validation_pipeline(
-                payload.problem_statement,
-                payload.type,
-                payload.correct_answers or []
-            )
-            validation_function = pipeline_result.get("validation_function", "")
-    except Exception as e:
-        # If generation fails, proceed with empty function but allow creation; clients can retry meta-validate later
-        print(f"[activities/create] validation function generation failed: {e}")
+    """
+    Create activities. If multiple questions are provided, create separate activity records for each question.
+    """
+    created_activities = []
+    
+    # Handle multiple questions in ONE activity with multiple validation functions
+    if payload.questions and len(payload.questions) > 1:
+        # Create UI config with all questions
+        multi_question_ui_config = {}
+        validation_functions = {}  # Map question_id to validation function
+        
+        if payload.type == "Mathematical":
+            multi_question_ui_config = {
+                "math": [
+                                            {
+                            "id": str(idx + 1),
+                            "question": question.question,
+                            "answer": question.expected_output if hasattr(question, 'expected_output') else 0,
+                            "question_id": question.question_id,
+                            "validation_function": question.code,
+                            "input_example": question.input_example if hasattr(question, 'input_example') else None,
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
+                        }
+                    for idx, question in enumerate(payload.questions)
+                ],
+                "validation_functions": {
+                    str(idx + 1): question.code 
+                    for idx, question in enumerate(payload.questions)
+                }
+            }
+        elif payload.type == "Logical":
+            multi_question_ui_config = {
+                "logic": [
+                                            {
+                            "id": str(idx + 1), 
+                            "question": question.question,
+                            "type": "text",
+                            "answer": question.expected_output if hasattr(question, 'expected_output') else "",
+                            "question_id": question.question_id,
+                            "validation_function": question.code,
+                            "input_example": question.input_example if hasattr(question, 'input_example') else None,
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
+                        }
+                    for idx, question in enumerate(payload.questions)
+                ],
+                "validation_functions": {
+                    str(idx + 1): question.code 
+                    for idx, question in enumerate(payload.questions)
+                }
+            }
+        else:
+            multi_question_ui_config = payload.ui_config
 
-    activity = DBActivity(
-        user_id=user.id,  # Add user_id from the authenticated teacher
-        title=payload.title,
-        worksheet_level=payload.worksheet_level,
-        type=payload.type,
-        difficulty=payload.difficulty,
-        problem_statement=payload.problem_statement,
-        ui_config=payload.ui_config,
-        validation_function=validation_function,
-        correct_answers=payload.correct_answers,
-    )
-    db.add(activity)
+        # Store all validation functions as JSON in the validation_function field
+        import json
+        combined_validation_functions = json.dumps({
+            str(idx + 1): question.code 
+            for idx, question in enumerate(payload.questions)
+        })
+
+        print(f"[DEBUG] Creating single activity with {len(payload.questions)} questions")
+        print(f"[DEBUG] UI Config: {multi_question_ui_config}")
+        print(f"[DEBUG] Combined validation functions: {combined_validation_functions}")
+        
+        # No validation or test case processing needed for now
+
+        activity = DBActivity(
+            user_id=user.id,
+            title=payload.title,
+            worksheet_level=payload.worksheet_level,
+            type=payload.type,
+            difficulty=payload.difficulty,
+            problem_statement=f"{len(payload.questions)} questions on {payload.type.lower()} problems",
+            ui_config=multi_question_ui_config,  # Use the original UI config
+            validation_function=combined_validation_functions,  # Store all validation functions
+            correct_answers=payload.correct_answers or {},
+            # Store test cases directly in the activity
+            input_example=payload.questions[0].input_example if payload.questions else None,
+            expected_output=payload.questions[0].expected_output if payload.questions else None,
+            validation_tests=payload.questions[0].validation_tests if payload.questions else None
+        )
+        db.add(activity)
+        db.flush()
+        
+        created_activities.append(ActivityRead(
+            id=activity.id,
+            user_id=activity.user_id,
+            title=activity.title,
+            worksheet_level=activity.worksheet_level,
+            type=activity.type,
+            difficulty=activity.difficulty,
+            problem_statement=activity.problem_statement,
+            ui_config=activity.ui_config,
+            validation_function=activity.validation_function,
+            correct_answers=activity.correct_answers,
+            created_at=activity.created_at,
+            # Include test case data in response
+            input_example=activity.input_example,
+            expected_output=activity.expected_output,
+            validation_tests=activity.validation_tests,
+            test_cases_count=activity.test_cases_count
+        ))
+    else:
+        # Single question/activity (original behavior)
+        validation_function = payload.validation_function or ""
+        problem_statement = payload.problem_statement
+        ui_config = payload.ui_config
+        
+        # If questions array has one item, use that question
+        if payload.questions and len(payload.questions) == 1:
+            question = payload.questions[0]
+            problem_statement = question.question
+            validation_function = question.code
+            
+            # Create proper UI config for single question
+            if payload.type == "Mathematical":
+                ui_config = {
+                    "math": [
+                        {
+                            "id": "1",
+                            "question": question.question,
+                            "answer": 0  # Will be calculated from validation function
+                        }
+                    ]
+                }
+            elif payload.type == "Logical":
+                ui_config = {
+                    "logic": [
+                        {
+                            "id": "1", 
+                            "question": question.question,
+                            "type": "text",
+                            "answer": ""
+                        }
+                    ]
+                }
+        
+        try:
+            if not validation_function:
+                pipeline_result = run_validation_pipeline(
+                    problem_statement,
+                    payload.type,
+                    payload.correct_answers or []
+                )
+                validation_function = pipeline_result.get("validation_function", "")
+        except Exception as e:
+            print(f"[activities/create] validation function generation failed: {e}")
+
+        activity = DBActivity(
+            user_id=user.id,
+            title=payload.title,
+            worksheet_level=payload.worksheet_level,
+            type=payload.type,
+            difficulty=payload.difficulty,
+            problem_statement=problem_statement,
+            ui_config=ui_config,
+            validation_function=validation_function,
+            correct_answers=payload.correct_answers,
+            # Store test cases directly in the activity
+            input_example=payload.questions[0].input_example if payload.questions else None,
+            expected_output=payload.questions[0].expected_output if payload.questions else None,
+            validation_tests=payload.questions[0].validation_tests if payload.questions else None
+        )
+        db.add(activity)
+        db.flush()
+        
+        created_activities.append(ActivityRead(
+            id=activity.id,
+            user_id=activity.user_id,
+            title=activity.title,
+            worksheet_level=activity.worksheet_level,
+            type=activity.type,
+            difficulty=activity.difficulty,
+            problem_statement=activity.problem_statement,
+            ui_config=activity.ui_config,
+            validation_function=activity.validation_function,
+            correct_answers=activity.correct_answers,
+            created_at=activity.created_at,
+            # Include test case data in response
+            input_example=activity.input_example,
+            expected_output=activity.expected_output,
+            validation_tests=activity.validation_tests,
+            test_cases_count=activity.test_cases_count
+        ))
+    
     db.commit()
-    db.refresh(activity)
-    return ActivityRead(
-        id=activity.id,
-        user_id=activity.user_id,
-        title=activity.title,
-        worksheet_level=activity.worksheet_level,
-        type=activity.type,
-        difficulty=activity.difficulty,
-        problem_statement=activity.problem_statement,
-        ui_config=activity.ui_config,
-        validation_function=activity.validation_function,
-        correct_answers=activity.correct_answers,
-        created_at=activity.created_at,
-    )
+    return created_activities[0] if created_activities else None
 
 
 @app.get("/activities", response_model=list[ActivityRead])
@@ -435,6 +602,11 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
     # If user is a teacher, they can only view their own activities
     if user.role == "teacher" and a.user_id != user.id:
         raise HTTPException(status_code=403, detail="You don't have permission to access this activity")
+    
+    print(f"[DEBUG] Fetching activity {activity_id}")
+    print(f"[DEBUG] Activity title: {a.title}")
+    print(f"[DEBUG] UI Config from DB: {a.ui_config}")
+    print(f"[DEBUG] UI Config type: {type(a.ui_config)}")
         
     return ActivityRead(
         id=a.id,

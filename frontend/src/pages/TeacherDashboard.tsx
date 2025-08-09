@@ -138,10 +138,11 @@ const TeacherDashboard = () => {
     title: '',
     problemStatement: '',
     type: '',
-    difficulty: ''
+    difficulty: '',
+    numQuestions: 1
   });
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: string, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -167,41 +168,85 @@ const TeacherDashboard = () => {
     setIsGenerating(true);
     try {
       const data = await postJson("/generate-code", 
-        { user_query: formData.problemStatement || formData.title, type: formData.type },
+        { 
+          user_query: formData.problemStatement || formData.title, 
+          type: formData.type,
+          num_questions: formData.numQuestions
+        },
         token
       );
-      const validationFunction = data?.code || "";
-      const generatedQuestion = data?.question || "";
-      // Build preview content based on type, using the LLM-generated question when available
+      
+      // Handle new response format with multiple questions
+      const questions = data?.questions || [];
+      const totalQuestions = data?.total_questions || 1;
+      
+      if (questions.length === 0) {
+        throw new Error("No questions were generated");
+      }
+
+      // Build preview content based on type and number of questions
       let previewContent: any = { ...mockGeneratedContent };
-      if ((formData.type === 'Mathematical') && generatedQuestion) {
+      
+      if (formData.type === 'Mathematical') {
         previewContent = {
-          math: [
-            { id: '1', question: generatedQuestion, answer: 0 }
-          ]
+          math: questions.map((q: any, index: number) => ({
+            id: String(index + 1),
+            question: q.question,
+            answer: 0, // Will be calculated from validation function
+            code: q.code,
+            question_id: q.question_id
+          }))
+        };
+      } else if (formData.type === 'Logical') {
+        previewContent = {
+          logic: questions.map((q: any, index: number) => ({
+            id: String(index + 1),
+            question: q.question,
+            type: "text" as const,
+            answer: "",
+            code: q.code,
+            question_id: q.question_id
+          }))
         };
       }
-      // Attach the generated validation function
-      previewContent.validationFunction = validationFunction;
+
+      // Store all questions for activity creation
+      previewContent.questions = questions;
+      previewContent.totalQuestions = totalQuestions;
 
       const newPreview = {
         ...formData,
         id: Date.now().toString(),
         createdAt: new Date().toISOString(),
         content: previewContent,
+        questions: questions
       };
-      // If backend provided a question, use it as the problem statement for preview
-      if (generatedQuestion) {
-        newPreview.problemStatement = generatedQuestion;
+
+      // For single question, set problem statement to the question
+      if (questions.length === 1) {
+        newPreview.problemStatement = questions[0].question;
+        if (!formData.problemStatement) {
+          setFormData(prev => ({ ...prev, problemStatement: questions[0].question }));
+        }
+      } else {
+        // For multiple questions, use a combined title
+        newPreview.problemStatement = `${totalQuestions} questions generated`;
       }
+
       setPreviewActivity(newPreview);
-      // Also reflect the generated question in the form if it was empty
-      if (!formData.problemStatement && generatedQuestion) {
-        setFormData(prev => ({ ...prev, problemStatement: generatedQuestion }));
-      }
-      // Save to localStorage so ActivityDetail can retrieve generated function by id if needed
-      try { localStorage.setItem(`activity:${newPreview.id}:code`, validationFunction); } catch {}
-      toast({ title: "Activity Generated!", description: "Review it in the preview area." });
+      
+      // Save all questions to localStorage for ActivityDetail
+      questions.forEach((q: any, index: number) => {
+        try { 
+          localStorage.setItem(`activity:${newPreview.id}:question:${index}:code`, q.code);
+          localStorage.setItem(`activity:${newPreview.id}:question:${index}:question`, q.question);
+        } catch {}
+      });
+      
+      toast({ 
+        title: "Activity Generated!", 
+        description: `Generated ${totalQuestions} question${totalQuestions > 1 ? 's' : ''}. Review in the preview area.`
+      });
     } catch (e: any) {
       toast({ title: "Generation failed", description: e?.message || "Backend error", variant: "destructive" });
     } finally {
@@ -222,13 +267,14 @@ const TeacherDashboard = () => {
         problem_statement: previewActivity.problemStatement,
         ui_config: previewActivity.content,
         validation_function: previewActivity.content.validationFunction,
-        correct_answers: {}
+        correct_answers: {},
+        questions: previewActivity.questions || null // Pass questions array for multiple activities
       };
       
-      // Send to backend
+      // Send to backend - backend will return single activity with multiple questions
       const createdActivity = await createActivity(activityData, token);
       
-      // Update local state
+      // Update local state with new activity
       const newActivity: Activity = {
         id: createdActivity.id,
         title: createdActivity.title,
@@ -246,12 +292,14 @@ const TeacherDashboard = () => {
         title: '',
         problemStatement: '',
         type: '',
-        difficulty: ''
+        difficulty: '',
+        numQuestions: 1
       });
 
+      const questionCount = previewActivity.questions ? previewActivity.questions.length : 1;
       toast({
         title: "Activity Published!",
-        description: "Your activity is now available to students."
+        description: `Your activity with ${questionCount} question${questionCount > 1 ? 's' : ''} is now available to students.`
       });
     } catch (error) {
       console.error('Failed to publish activity:', error);
@@ -344,7 +392,7 @@ const TeacherDashboard = () => {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label>Activity Type</Label>
                       <Select value={formData.type} onValueChange={(value) => handleInputChange('type', value)}>
@@ -371,6 +419,18 @@ const TeacherDashboard = () => {
                           <SelectItem value="Hard">Hard</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="numQuestions">Number of Questions</Label>
+                      <Input
+                        id="numQuestions"
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={formData.numQuestions}
+                        onChange={(e) => handleInputChange('numQuestions', parseInt(e.target.value) || 1)}
+                      />
                     </div>
                   </div>
 
