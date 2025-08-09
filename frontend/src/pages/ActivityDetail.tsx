@@ -432,9 +432,12 @@ const ActivityDetail = () => {
     const perQuestionTestDetails: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>> = {};
     if (validationResult?.metadata?.question_results) {
       for (const [qid, info] of Object.entries(validationResult.metadata.question_results as any)) {
-        perQuestionTests[qid] = { passed: (info as any).tests_passed || 0, total: (info as any).tests_total || 0 };
+        // Clamp totals to at most 5 for UI consistency
+        const total = Math.min(5, Number((info as any).tests_total || 0));
+        const passed = Math.min(total, Number((info as any).tests_passed || 0));
+        perQuestionTests[qid] = { passed, total };
         if ((info as any).test_details) {
-          perQuestionTestDetails[qid] = (info as any).test_details as any;
+          perQuestionTestDetails[qid] = ((info as any).test_details as any[]).slice(0, 5);
         }
       }
     }

@@ -118,7 +118,7 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
               )}
               {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">
-                  Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? (problem.validation_tests?.length || 0)}
+                  Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? Math.min(5, problem.validation_tests?.length || 5)}
                 </div>
               )}
               {showResults && showTests && perQuestionTestDetails[problem.id] && (

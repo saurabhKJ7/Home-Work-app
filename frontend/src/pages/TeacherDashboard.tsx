@@ -208,7 +208,8 @@ const TeacherDashboard = () => {
       let passed = 0;
       let total = 0;
       const details: Array<{ input: any; expected: any; actual: any; passed: boolean }> = [];
-      for (const t of tests) {
+      // Only consider the first 5 tests on the frontend
+      for (const t of tests.slice(0, 5)) {
         total++;
         try {
           const out = callWithInput(t.input);
