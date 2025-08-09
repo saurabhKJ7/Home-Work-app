@@ -15,7 +15,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { PlusCircle, Eye, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { postJson, fetchActivities, createActivity, deleteActivity, metaValidate } from "@/lib/api";
+import { postJson, fetchActivities, createActivity, deleteActivity } from "@/lib/api";
 
 // Mock data for activities
 const mockActivities: Activity[] = [
@@ -76,7 +76,7 @@ const TeacherDashboard = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [previewActivity, setPreviewActivity] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [metaResult, setMetaResult] = useState<any>(null);
+  // Removed meta-validation UI
   const [isLoading, setIsLoading] = useState(true);
   // Teacher-selected tests and responses for preview validation
   const [teacherSelectedTests, setTeacherSelectedTests] = useState<Record<string, any[]>>({});
@@ -758,48 +758,11 @@ const TeacherDashboard = () => {
 
                       {/* Per-question teacher inputs and run buttons are rendered inline above */}
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
                         <Button onClick={handlePublishActivity} variant="success" className="w-full">
                           Publish Activity
                         </Button>
-                        <Button
-                          variant="outline"
-                          onClick={async () => {
-                            try {
-                              setMetaResult(null);
-                              const res = await metaValidate(
-                                previewActivity.problemStatement || previewActivity.title,
-                                previewActivity.type || 'Mathematical',
-                                []
-                              );
-                              setMetaResult(res);
-                              toast({ title: 'Meta-validation complete', description: `Accuracy ${Math.round(res.accuracy_score * 100)}%` });
-                            } catch (e: any) {
-                              toast({ title: 'Meta-validation failed', description: e?.message || 'Backend error', variant: 'destructive' });
-                            }
-                          }}
-                        >
-                          Run Meta-Validation
-                        </Button>
                       </div>
-
-                      {metaResult && (
-                        <div className="p-3 border rounded-md bg-muted/30 space-y-2">
-                          <p className="text-sm"><strong>Reliable:</strong> {metaResult.is_reliable ? 'Yes' : 'No'}</p>
-                          <p className="text-sm"><strong>Accuracy:</strong> {Math.round(metaResult.accuracy_score * 100)}%</p>
-                          <p className="text-sm"><strong>Confidence:</strong> {Math.round(metaResult.confidence_level * 100)}%</p>
-                          {metaResult.improvement_suggestions?.length > 0 && (
-                            <div className="text-sm">
-                              <strong>Suggestions:</strong>
-                              <ul className="list-disc pl-5">
-                                {metaResult.improvement_suggestions.map((s: string, i: number) => (
-                                  <li key={i}>{s}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
                   ) : (
                     <div className="text-center py-12 text-muted-foreground">
