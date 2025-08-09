@@ -124,7 +124,7 @@ const ActivityDetail = () => {
           createdAt: activityData.created_at,
           userId: activityData.user_id,
           content: activityData.ui_config || {},
-          validation_function: activityData.validation_function || (() => { try { return localStorage.getItem(`activity:${activityData.id}:code`) || "" } catch { return "" } })()
+          validation_function: activityData.validation_function
         };
         
         // If we don't have content from the backend, use mock data based on type
@@ -223,87 +223,122 @@ const ActivityDetail = () => {
     const endTime = new Date();
     const timeSpent = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
     
-    // Always validate against DB validation_function via backend
-    let score;
-    let backendValidation: { is_correct: boolean; feedback: string; confidence_score: number } | null = null;
+    console.log('Activity:', activity);
+    console.log('Submitting answers:', answers);
+    
+    // Execute validation function from activity
+    let validationResult;
     try {
-      backendValidation = await validateSubmission(id, answers, token);
-      const percentage = backendValidation.is_correct ? 100 : 0;
-      score = { correct: backendValidation.is_correct ? 1 : 0, total: 1, percentage };
-    } catch (e) {
-      // Fallback: attempt client-side scoring if content includes correct answers
-      try {
-        if (activity.type === 'Grid-based' && activity.content?.answer) {
-          score = calculateScore(answers, activity.content.answer, activity.type);
-        } else if (activity.type === 'Mathematical' && activity.content?.math) {
-          score = calculateScore(answers, activity.content.math, activity.type);
-        } else if (activity.type === 'Logical' && activity.content?.logic) {
-          score = calculateScore(answers, activity.content.logic, activity.type);
-        } else {
-          score = { correct: 0, total: 0, percentage: 0 };
-        }
-      } catch {
-        score = { correct: 0, total: 0, percentage: 0 };
+      if (!activity.validation_function) {
+        console.log('No validation function found in activity');
+        throw new Error("No validation function available");
       }
+      
+      console.log('Validation function:', activity.validation_function);
+      
+      // Extract the expected answer by executing the stored function
+      const getExpectedAnswer = new Function(`
+        ${activity.validation_function}
+        return calculateAnswer();
+      `);
+      
+      // Get the expected answer
+      const expectedAnswer = getExpectedAnswer();
+      console.log('Expected answer:', expectedAnswer);
+      
+      // Create validation function
+      const validateFn = new Function('params', `
+        try {
+          function evaluate(params) {
+            const { submission } = params;
+            const expectedAnswer = ${expectedAnswer}; // Use the extracted answer
+            
+            console.log('Comparing submission:', submission['1'], 'with expected:', expectedAnswer);
+            const isCorrect = submission && submission['1'] === expectedAnswer;
+            
+            return {
+              is_correct: isCorrect,
+              feedback: isCorrect ? 'Correct! Well done!' : 'Not quite right. Try again.',
+              confidence_score: isCorrect ? 1.0 : 0.0
+            };
+          }
+          
+          return evaluate(params);
+        } catch (error) {
+          console.error('Validation function error:', error);
+          return {
+            is_correct: false,
+            feedback: "Error in validation: " + error.message,
+            confidence_score: 0
+          };
+        }
+      `);
+      
+      // Execute the validation
+      validationResult = validateFn({
+        submission: answers,
+        global_context_variables: { attempt_number: 1 }
+      });
+      
+      console.log('Raw validation result:', validationResult);
+      
+      // Ensure we have a valid result object
+      validationResult = {
+        is_correct: Boolean(validationResult?.is_correct),
+        feedback: String(validationResult?.feedback || 'No feedback provided'),
+        confidence_score: Number(validationResult?.confidence_score || 0)
+      };
+      
+      console.log('Processed validation result:', validationResult);
+      
+    } catch (error) {
+      console.error('Error executing validation function:', error);
+      validationResult = {
+        is_correct: false,
+        feedback: "Error validating submission: " + error.message,
+        confidence_score: 0
+      };
     }
-
+    
     const result = {
-      score,
+      score: {
+        correct: validationResult.is_correct ? 1 : 0,
+        total: 1,
+        percentage: validationResult.is_correct ? 100 : 0
+      },
       timeSpent,
       userAnswers: answers,
-      feedback: score.percentage >= 80 ? 'Excellent work!' : 
-                score.percentage >= 60 ? 'Good effort!' : 
-                'Keep practicing!'
+      feedback: validationResult.feedback || (validationResult.is_correct ? 'Correct!' : 'Incorrect. Try again.')
     };
 
     try {
-      // Submit attempt to the database
+      // Submit attempt with validation results to the database
       await submitAttempt(id, {
         submission: answers,
-        time_spent_seconds: timeSpent
+        time_spent_seconds: timeSpent,
+        is_correct: validationResult.is_correct,
+        score_percentage: validationResult.is_correct ? 100 : 0,
+        feedback: validationResult.feedback,
+        confidence_score: validationResult.confidence_score || 0
       }, token);
       
-      // Prefer feedback from validation endpoint when available
-      if (backendValidation) {
-        result.feedback = backendValidation.feedback || result.feedback;
-        (result as any).confidence = backendValidation.confidence_score;
-      } else {
-        // Optional: keep legacy feedback endpoint as a fallback
-        try {
-          const generated_function = activity.validation_function && activity.validation_function.length > 0
-            ? activity.validation_function
-            : (() => { try { return localStorage.getItem(`activity:${activity.id}:code`) || "" } catch { return "" } })();
-          const feedbackResponse = await postJson("/feedback-answer", {
-            user_query: activity.problemStatement,
-            generated_function,
-            submission: answers,
-            activity_type: activity.type,
-          }, token);
-          if (feedbackResponse) {
-            result.feedback = feedbackResponse?.feedback || result.feedback;
-            (result as any).confidence = feedbackResponse?.confidence_score;
-          }
-        } catch (error) {
-          console.error('Error getting feedback:', error);
-        }
-      }
+      setSubmissionResult(result);
+      setIsSubmitted(true);
+
+      toast({
+        title: "Assignment Submitted!",
+        description: `You scored ${result.score.percentage}% - ${result.feedback}`,
+        variant: result.score.percentage >= 60 ? "default" : "destructive"
+      });
+      
     } catch (error) {
       console.error('Error submitting attempt:', error);
       toast({
-        title: "Submission saved locally",
-        description: "Could not save to server, but your results are available here",
+        title: "Error saving attempt",
+        description: "Could not save your attempt to the server",
         variant: "destructive"
       });
     }
-
-    setSubmissionResult(result);
-    setIsSubmitted(true);
-
-    toast({
-      title: "Assignment Submitted!",
-      description: `You scored ${score.percentage}% - ${result.feedback}`,
-      variant: score.percentage >= 60 ? "default" : "destructive"
-    });
   };
 
   const handleTryAgain = () => {

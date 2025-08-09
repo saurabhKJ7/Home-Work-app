@@ -48,3 +48,13 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CodeGeneration(Base):
+    __tablename__ = "code_generations"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    user_id = Column(String, nullable=True, index=True)  # Optional: if user is authenticated
+    type = Column(String, nullable=True)
+    user_query = Column(Text, nullable=False)
+    generated_code = Column(Text, nullable=False)
+    generated_question = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

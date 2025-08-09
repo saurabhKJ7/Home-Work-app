@@ -104,7 +104,9 @@ const StudentPortal = () => {
           difficulty: item.difficulty as any,
           problemStatement: item.problem_statement,
           createdAt: item.created_at,
-          userId: item.user_id
+          userId: item.user_id,
+          validation_function: item.validation_function,
+          ui_config: item.ui_config
         }));
         setActivities(mappedActivities);
       } catch (error) {

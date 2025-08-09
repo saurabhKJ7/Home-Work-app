@@ -59,9 +59,7 @@ def init_langsmith():
 
 
 
-from e2b import Sandbox
-
-sandbox = Sandbox(template="base", api_key=os.getenv('E2B_API_KEY'))  # create once
+from .sandbox import sandbox  # Import mock sandbox instance
 
 def evaluate_code(code):
     import time 

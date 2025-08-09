@@ -19,7 +19,7 @@ from models.schema import (
     ValidationResponse,
     MetaValidationRequest,
 )
-from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser
+from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser, CodeGeneration as DBCodeGen
 from utils.db import get_db, Base, engine
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
@@ -182,7 +182,11 @@ def get_current_user_profile(user: DBUser = Depends(get_current_user)):
 
 
 @app.post("/generate-code", response_model=GenerateCodeResponse)
-async def generate_code(payload: GenerateCodeRequest):
+async def generate_code(
+    payload: GenerateCodeRequest,
+    db: Session = Depends(get_db),
+    current_user: DBUser | None = Depends(lambda: None)
+):
     try:
         # Use enhanced RAG system
         rag_data = get_enhanced_rag_data(
@@ -193,6 +197,17 @@ async def generate_code(payload: GenerateCodeRequest):
         # Generate code using improved function
         result = get_evaluate_function(rag_data, payload.user_query)
         
+        # Store the generation in the database
+        code_gen = DBCodeGen(
+            user_id=current_user.id if current_user else None,
+            type=payload.type,
+            user_query=payload.user_query,
+            generated_code=result.code,
+            generated_question=result.question
+        )
+        db.add(code_gen)
+        db.commit()
+        
         # Return both question and code
         return {"code": result.code, "question": result.question}
     except Exception as e:
@@ -200,37 +215,62 @@ async def generate_code(payload: GenerateCodeRequest):
 
 
 @app.post("/validate-function", response_model=ValidationResponse)
-async def validate_function_endpoint(payload: ValidationRequest):
+async def validate_function_endpoint(payload: ValidationRequest, db: Session = Depends(get_db)):
     try:
-        # Always fetch the latest validation_function from DB by activity_id
-        db = next(get_db())
+        # Start transaction
         activity = db.query(DBActivity).filter(DBActivity.id == payload.activity_id).first()
         if not activity:
             raise HTTPException(status_code=404, detail="Activity not found")
 
+        # Ensure we have a validation function
         if not activity.validation_function:
-            # Attempt on-the-fly generation if missing
             try:
+                print(f"[validate-function] Generating validation function for activity {activity.id}")
                 pipeline = run_validation_pipeline(
                     activity.problem_statement,
                     activity.type,
-                    []
+                    activity.correct_answers or []  # Use stored correct answers
                 )
                 activity.validation_function = pipeline.get("validation_function", "")
+                if not activity.validation_function:
+                    raise ValueError("Failed to generate validation function")
+                    
                 db.add(activity)
                 db.commit()
+                print(f"[validate-function] Generated and saved validation function for activity {activity.id}")
             except Exception as gen_err:
-                print(f"[validate-function] generation failed: {gen_err}")
+                db.rollback()
+                print(f"[validate-function] Generation failed for activity {activity.id}: {gen_err}")
+                return ValidationResponse(
+                    is_correct=False,
+                    feedback="Unable to validate answer at this time. Please try again later.",
+                    confidence_score=0.0,
+                    metadata={"error": "validation_function_generation_failed"}
+                )
 
-        # Validate submission using DB-stored code
-        result = validate_student_submission(
-            activity.validation_function or "",
-            payload.student_response,
-            activity.type,
-            payload.attempt_number
-        )
-        return result
+        try:
+            # Validate submission
+            result = validate_student_submission(
+                activity.validation_function,
+                payload.student_response,
+                activity.type,
+                payload.attempt_number
+            )
+            
+            # Result is already a ValidationResponse
+            return result
+            
+        except Exception as val_err:
+            print(f"[validate-function] Validation failed for activity {activity.id}: {val_err}")
+            return ValidationResponse(
+                is_correct=False,
+                feedback="Error validating your answer. Please check your submission format.",
+                confidence_score=0.0,
+                metadata={"error": "validation_execution_failed"}
+            )
+            
     except Exception as e:
+        print(f"[validate-function] Unexpected error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -328,28 +368,62 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
 @app.get("/activities", response_model=list[ActivityRead])
 def list_activities(db: Session = Depends(get_db), user: DBUser = Depends(get_current_user)):
     # For teachers: show only their created activities
-    # For students: show all activities
+    # For students: show all activities with completion status
     if user.role == "teacher":
         rows = db.query(DBActivity).filter(DBActivity.user_id == user.id).order_by(DBActivity.created_at.desc()).all()
+        return [
+            ActivityRead(
+                id=a.id,
+                user_id=a.user_id,
+                title=a.title,
+                worksheet_level=a.worksheet_level,
+                type=a.type,
+                difficulty=a.difficulty,
+                problem_statement=a.problem_statement,
+                ui_config=a.ui_config,
+                validation_function=a.validation_function,
+                correct_answers=a.correct_answers,
+                created_at=a.created_at,
+                is_completed=False,  # Teachers don't complete activities
+                best_score=0.0
+            )
+            for a in rows
+        ]
     else:
-        rows = db.query(DBActivity).order_by(DBActivity.created_at.desc()).all()
-    
-    return [
-        ActivityRead(
-            id=a.id,
-            user_id=a.user_id,
-            title=a.title,
-            worksheet_level=a.worksheet_level,
-            type=a.type,
-            difficulty=a.difficulty,
-            problem_statement=a.problem_statement,
-            ui_config=a.ui_config,
-            validation_function=a.validation_function,
-            correct_answers=a.correct_answers,
-            created_at=a.created_at,
-        )
-        for a in rows
-    ]
+        # For students, we need to join with attempts to get completion status
+        activities = db.query(DBActivity).order_by(DBActivity.created_at.desc()).all()
+        
+        # Get all successful attempts for this student
+        student_attempts = db.query(DBAttempt).filter(
+            DBAttempt.user_id == user.id
+        ).all()
+        
+        # Create a map of activity_id to best attempt
+        activity_attempts = {}
+        for attempt in student_attempts:
+            current_best = activity_attempts.get(attempt.activity_id)
+            attempt_score = float(attempt.score_percentage)
+            if not current_best or attempt_score > float(current_best.score_percentage):
+                activity_attempts[attempt.activity_id] = attempt
+        
+        return [
+            ActivityRead(
+                id=a.id,
+                user_id=a.user_id,
+                title=a.title,
+                worksheet_level=a.worksheet_level,
+                type=a.type,
+                difficulty=a.difficulty,
+                problem_statement=a.problem_statement,
+                ui_config=a.ui_config,
+                validation_function=a.validation_function,
+                correct_answers=a.correct_answers,
+                created_at=a.created_at,
+                is_completed=bool(activity_attempts.get(a.id) and activity_attempts[a.id].is_correct == "true"),
+                best_score=float(activity_attempts[a.id].score_percentage) if a.id in activity_attempts else 0.0
+            )
+            for a in activities
+        ]
 
 
 @app.get("/activities/{activity_id}", response_model=ActivityRead)
@@ -393,38 +467,58 @@ def delete_activity(activity_id: str, db: Session = Depends(get_db), user: DBUse
 
 
 @app.post("/activities/{activity_id}/attempts", response_model=AttemptRead)
-def create_attempt(activity_id: str, payload: AttemptCreate, db: Session = Depends(get_db), user: DBUser = Depends(require_role("student"))):
-    # Verify the activity exists
-    activity = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
-    if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
-    
-    # Create attempt with student's user_id
-    attempt = DBAttempt(
-        user_id=user.id,  # Add user_id from the authenticated student
-        activity_id=activity_id,
-        submission=payload.submission,
-        is_correct="false",
-        score_percentage="0",
-        feedback=None,
-        confidence_score="0",
-        time_spent_seconds=str(payload.time_spent_seconds or 0),
-    )
-    db.add(attempt)
-    db.commit()
-    db.refresh(attempt)
-    return AttemptRead(
-        id=attempt.id,
-        user_id=attempt.user_id,
-        activity_id=attempt.activity_id,
-        submission=attempt.submission,
-        is_correct=(attempt.is_correct == "true"),
-        score_percentage=float(attempt.score_percentage),
-        feedback=attempt.feedback or "",
-        confidence_score=float(attempt.confidence_score),
-        time_spent_seconds=int(attempt.time_spent_seconds or 0),
-        created_at=attempt.created_at,
-    )
+async def create_attempt(
+    activity_id: str,
+    payload: AttemptCreate,
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(require_role("student"))
+):
+    try:
+        # Start transaction
+        activity = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
+        if not activity:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        
+        # Create attempt with frontend-validated results
+        # Frontend should send these values after running the validation function
+        attempt = DBAttempt(
+            user_id=user.id,
+            activity_id=activity_id,
+            submission=payload.submission,
+            is_correct=str(payload.is_correct).lower() if hasattr(payload, 'is_correct') else "false",
+            score_percentage=str(getattr(payload, 'score_percentage', 0)),
+            feedback=getattr(payload, 'feedback', ''),
+            confidence_score=str(getattr(payload, 'confidence_score', 0)),
+            time_spent_seconds=str(payload.time_spent_seconds or 0),
+        )
+        
+        try:
+            db.add(attempt)
+            db.commit()
+            db.refresh(attempt)
+        except Exception as db_err:
+            db.rollback()
+            print(f"[attempts/create] Database error: {db_err}")
+            raise HTTPException(status_code=500, detail="Failed to save attempt")
+        
+        return AttemptRead(
+            id=attempt.id,
+            user_id=attempt.user_id,
+            activity_id=attempt.activity_id,
+            submission=attempt.submission,
+            is_correct=(attempt.is_correct == "true"),
+            score_percentage=float(attempt.score_percentage),
+            feedback=attempt.feedback or "",
+            confidence_score=float(attempt.confidence_score),
+            time_spent_seconds=int(attempt.time_spent_seconds or 0),
+            created_at=attempt.created_at,
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[attempts/create] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

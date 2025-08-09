@@ -3,17 +3,24 @@ export const API_BASE: string = import.meta.env.VITE_API_BASE_URL || "/api";
 console.log("API Base URL:", API_BASE); // Debug log to check the actual URL being used
 
 export async function postJson<T = any>(path: string, body: any, token?: string): Promise<T> {
+  if (!token) {
+    throw new Error('Authentication token is required');
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Accept": "application/json",
+    "Authorization": `Bearer ${token}`
   };
   
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  
   const url = `${API_BASE}${path}`;
-  console.log(`Posting to: ${url}`, { headers: { ...headers, Authorization: token ? '(Bearer token present)' : 'none' } });
+  console.log(`Posting to: ${url}`, { 
+    headers: { 
+      ...headers, 
+      Authorization: '(Bearer token present)' 
+    },
+    body: body 
+  });
   
   try {
     const res = await fetch(url, {
@@ -151,18 +158,35 @@ export async function getActivityById(activityId: string, token: string): Promis
   return getJson(`/activities/${activityId}`, token);
 }
 
-export async function submitAttempt(activityId: string, attemptData: any, token: string): Promise<any> {
+import { ValidationService } from './validation';
+
+export async function submitAttempt(
+  activityId: string, 
+  attemptData: any,
+  token: string
+): Promise<any> {
   return postJson(`/activities/${activityId}/attempts`, attemptData, token);
 }
 
-// Validate submission via backend validator (aligns with PRD validation pipeline)
-export async function validateSubmission(activityId: string, submission: any, token: string): Promise<{ is_correct: boolean; feedback: string; confidence_score: number; metadata?: any; }> {
-  return postJson(`/validate-function`, {
-    activity_id: activityId,
-    student_response: submission,
-    attempt_number: 1,
-    context_variables: {}
-  }, token);
+// Client-side validation using the activity's validation function
+export function validateSubmission(
+  submission: any,
+  activity: any,
+  attemptNumber: number = 1
+): { is_correct: boolean; feedback: string; confidence_score: number; metadata?: any; } {
+  if (!activity.validation_function) {
+    return {
+      is_correct: false,
+      feedback: "No validation function available for this activity",
+      confidence_score: 0,
+      metadata: { error: "missing_validation_function" }
+    };
+  }
+
+  return ValidationService.executeValidation(activity.validation_function, {
+    submission,
+    global_context_variables: { attempt_number: attemptNumber }
+  });
 }
 
 // Meta-validate a generated function (PRD feature)

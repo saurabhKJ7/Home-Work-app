@@ -1,7 +1,7 @@
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Clock, Grid3X3, Calculator, Brain } from "lucide-react";
+import { BookOpen, Target, Trophy, Clock, CheckCircle2 } from "lucide-react";
 
 export interface Activity {
   id: string;
@@ -11,86 +11,97 @@ export interface Activity {
   difficulty: 'Easy' | 'Medium' | 'Hard';
   problemStatement: string;
   createdAt: string;
-  userId?: string; // ID of the teacher who created the activity
+  userId?: string;
+  validation_function?: string;
+  ui_config?: Record<string, any>;
+  is_completed?: boolean;
+  best_score?: number;
 }
 
 interface ActivityCardProps {
   activity: Activity;
-  onStart?: (id: string) => void;
-  onEdit?: (id: string) => void;
-  onDelete?: (id: string) => void;
-  isTeacherView?: boolean;
+  onStart: (id: string) => void;
 }
 
-const ActivityCard = ({ activity, onStart, onEdit, onDelete, isTeacherView = false }: ActivityCardProps) => {
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty.toLowerCase()) {
-      case 'easy': return 'bg-easy-background text-easy border-easy/20';
-      case 'medium': return 'bg-medium-background text-medium border-medium/20';
-      case 'hard': return 'bg-hard-background text-hard border-hard/20';
-      default: return 'bg-muted text-muted-foreground';
+const ActivityCard = ({ activity, onStart }: ActivityCardProps) => {
+  const getDifficultyIcon = () => {
+    switch (activity.difficulty) {
+      case 'Easy':
+        return <Target className="w-4 h-4 text-success" />;
+      case 'Medium':
+        return <Clock className="w-4 h-4 text-warning" />;
+      case 'Hard':
+        return <Trophy className="w-4 h-4 text-hard" />;
+      default:
+        return <BookOpen className="w-4 h-4" />;
     }
   };
 
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'Grid-based': return <Grid3X3 className="w-4 h-4" />;
-      case 'Mathematical': return <Calculator className="w-4 h-4" />;
-      case 'Logical': return <Brain className="w-4 h-4" />;
-      default: return <Grid3X3 className="w-4 h-4" />;
+  const getDifficultyClass = () => {
+    switch (activity.difficulty) {
+      case 'Easy':
+        return 'bg-success/10 text-success';
+      case 'Medium':
+        return 'bg-warning/10 text-warning';
+      case 'Hard':
+        return 'bg-hard/10 text-hard';
+      default:
+        return 'bg-primary/10 text-primary';
+    }
+  };
+
+  const getTypeClass = () => {
+    switch (activity.type) {
+      case 'Grid-based':
+        return 'bg-grid/10 text-grid';
+      case 'Mathematical':
+        return 'bg-math/10 text-math';
+      case 'Logical':
+        return 'bg-logic/10 text-logic';
+      default:
+        return 'bg-primary/10 text-primary';
     }
   };
 
   return (
-    <Card className="group hover:shadow-card transition-all duration-300 hover:-translate-y-1 animate-slide-up">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            {getTypeIcon(activity.type)}
-            <CardTitle className="text-lg">{activity.title}</CardTitle>
-          </div>
-          <Badge variant="outline" className={getDifficultyColor(activity.difficulty)}>
-            {activity.difficulty}
+    <Card className="shadow-card hover:shadow-elegant transition-shadow">
+      <CardHeader>
+        <div className="flex justify-between items-start mb-2">
+          <Badge variant="outline" className={getDifficultyClass()}>
+            <span className="flex items-center gap-1">
+              {getDifficultyIcon()}
+              {activity.difficulty}
+            </span>
+          </Badge>
+          <Badge variant="outline" className={getTypeClass()}>
+            {activity.type}
           </Badge>
         </div>
-        <CardDescription className="text-sm text-muted-foreground">
-          {activity.worksheetLevel} • {activity.type}
-        </CardDescription>
+        <CardTitle>{activity.title}</CardTitle>
+        <CardDescription>Level: {activity.worksheetLevel}</CardDescription>
       </CardHeader>
-      
       <CardContent>
-        <p className="text-sm text-foreground/80 line-clamp-3">
+        <p className="text-sm text-muted-foreground line-clamp-3">
           {activity.problemStatement}
         </p>
-        <div className="flex items-center space-x-1 mt-3 text-xs text-muted-foreground">
-          <Clock className="w-3 h-3" />
-          <span>Created {new Date(activity.createdAt).toLocaleDateString()}</span>
-        </div>
       </CardContent>
-      
-      <CardFooter className="pt-0">
-        {isTeacherView ? (
-          <div className="flex space-x-2 w-full">
-            {onEdit && (
-              <Button variant="outline" size="sm" onClick={() => onEdit(activity.id)} className="flex-1">
-                Edit
-              </Button>
-            )}
-            {onDelete && (
-              <Button variant="destructive" size="sm" onClick={() => onDelete(activity.id)} className="flex-1">
-                Delete
-              </Button>
-            )}
+      <CardFooter className="flex flex-col gap-2">
+        {activity.is_completed && (
+          <div className="flex items-center justify-between w-full text-sm text-success">
+            <span className="flex items-center gap-1">
+              <CheckCircle2 className="w-4 h-4" />
+              Completed
+            </span>
+            <span>Best Score: {activity.best_score}%</span>
           </div>
-        ) : (
-          <Button 
-            variant="gamelike" 
-            className="w-full"
-            onClick={() => onStart?.(activity.id)}
-          >
-            Start Activity
-          </Button>
         )}
+        <Button
+          variant={activity.is_completed ? "outline" : "default"}
+          onClick={() => onStart(activity.id)}
+          className="w-full"
+        >
+          {activity.is_completed ? "Review Activity" : "Start Activity"}
+        </Button>
       </CardFooter>
     </Card>
   );

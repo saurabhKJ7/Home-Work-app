@@ -72,6 +72,8 @@ class ActivityRead(ActivityBase):
     id: str
     user_id: str
     created_at: datetime
+    is_completed: bool = False  # Whether the current student has completed this activity
+    best_score: float = 0.0    # Student's best score on this activity
 
     class Config:
         from_attributes = True
@@ -80,6 +82,11 @@ class ActivityRead(ActivityBase):
 class AttemptCreate(BaseModel):
     submission: Any
     time_spent_seconds: Optional[int] = None
+    # Fields for frontend validation results
+    is_correct: Optional[bool] = None
+    score_percentage: Optional[float] = None
+    feedback: Optional[str] = None
+    confidence_score: Optional[float] = None
 
 
 class AttemptRead(BaseModel):

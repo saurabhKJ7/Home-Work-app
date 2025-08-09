@@ -3,11 +3,7 @@ Meta-validation framework to assess the accuracy of generated validation functio
 """
 import json
 from typing import Dict, List, Any, Tuple
-from e2b import Sandbox
-import os
-
-# Reuse the sandbox from llm_chain.py
-sandbox = Sandbox(template="base", api_key=os.getenv('E2B_API_KEY'))
+from .sandbox import sandbox  # Import mock sandbox instance
 
 def execute_validation_function(validation_function: str, test_input: Dict[str, Any]) -> Dict[str, Any]:
     """
