@@ -63,7 +63,7 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
               <div className="flex items-center space-x-3">
                 <span className="text-muted-foreground">Answer:</span>
                 <Input
-                  type="number"
+                  // type="number"
                   placeholder="Your answer"
                   value={answers[problem.id] || ''}
                   onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
@@ -74,11 +74,7 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
                       : "border-destructive bg-destructive/5"
                   ) : ""}
                 />
-                {showResults && !isCorrect(problem.id) && (
-                  <span className="text-success font-medium">
-                    Correct: {problem.answer}
-                  </span>
-                )}
+
               </div>
             </CardContent>
           </Card>

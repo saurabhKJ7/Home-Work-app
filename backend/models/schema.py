@@ -24,16 +24,30 @@ class MetaValidationRequest(BaseModel):
 # --- API models for integration ---
 
 class GenerateCodeRequest(BaseModel):
-    user_query: str
+    user_query: Optional[str] = None  # The query to generate code for
     title: Optional[str] = None
     worksheet_level: Optional[str] = None
     type: Optional[str] = None
     difficulty: Optional[str] = None
+    num_questions: Optional[int] = 1  # Number of questions to generate
+    input: Optional[str] = None  # For backward compatibility, will be removed in future
+
+    class Config:
+        extra = "allow"  # Allow extra fields in request
+
+
+class QuestionResponse(BaseModel):
+    code: str
+    question: str
+    question_id: Optional[str] = None
+    input_example: Optional[Dict[str, Any]] = None
+    expected_output: Optional[Any] = None
+    validation_tests: Optional[List[Dict[str, Any]]] = None
 
 
 class GenerateCodeResponse(BaseModel):
-    code: str
-    question: str = ""
+    questions: List[QuestionResponse]  # List of generated questions
+    total_questions: int
 
 
 class FeedbackRequest(BaseModel):
@@ -53,6 +67,10 @@ class FeedbackResponse(BaseModel):
 
 # --- Activity & Attempt models for API ---
 
+class TestCase(BaseModel):
+    input: Dict[str, Any]
+    expectedOutput: Any
+
 class ActivityBase(BaseModel):
     title: str
     worksheet_level: str
@@ -62,10 +80,15 @@ class ActivityBase(BaseModel):
     ui_config: Optional[Dict[str, Any]] = None
     validation_function: Optional[str] = None
     correct_answers: Optional[Dict[str, Any]] = None
+    # New fields for test cases and validation
+    input_example: Optional[Dict[str, Any]] = None
+    expected_output: Optional[Any] = None
+    validation_tests: Optional[List[TestCase]] = None
+    test_cases_count: Optional[int] = 10
 
 
 class ActivityCreate(ActivityBase):
-    pass
+    questions: Optional[List[QuestionResponse]] = None  # For multiple questions from generate-code
 
 
 class ActivityRead(ActivityBase):

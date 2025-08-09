@@ -11,6 +11,7 @@ import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw, Loader2 } fr
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { getActivityById, submitAttempt, postJson, validateSubmission } from "@/lib/api";
+import { ValidationService } from "@/lib/validation";
 
 // Mock activity data with content
 const mockActivityContent = {
@@ -112,6 +113,8 @@ const ActivityDetail = () => {
       try {
         setIsLoading(true);
         const activityData = await getActivityById(id, token);
+        console.log('Backend activity data:', activityData);
+        console.log('UI Config from backend:', activityData.ui_config);
         
         // Transform the data to match our component's expected format
         const transformedActivity = {
@@ -124,16 +127,20 @@ const ActivityDetail = () => {
           createdAt: activityData.created_at,
           userId: activityData.user_id,
           content: activityData.ui_config || {},
-          validation_function: activityData.validation_function
+          validation_function: activityData.validation_function,
+          input_example: activityData.input_example,
+          expected_output: activityData.expected_output
         };
         
-        // If we don't have content from the backend, use mock data based on type
+        // If we don't have content from the backend, create single-question content based on activity
         if (!transformedActivity.content || Object.keys(transformedActivity.content).length === 0) {
+          console.log('No ui_config found, creating single-question fallback content');
+          
+          // Check if this is a legacy activity with mock data
           if (mockActivityContent[id as keyof typeof mockActivityContent]) {
             transformedActivity.content = mockActivityContent[id as keyof typeof mockActivityContent].content;
           } else {
-            // Default mock content based on type
-            // Default content based on activity type
+            // Create single-question content based on the activity's problem statement
             if (transformedActivity.type === 'Grid-based') {
               transformedActivity.content = {
                 grid: [
@@ -149,18 +156,26 @@ const ActivityDetail = () => {
                 ]
               };
             } else if (transformedActivity.type === 'Mathematical') {
+              // Create SINGLE question based on activity's problem statement
               transformedActivity.content = {
                 math: [
-                  { id: "1", question: "Solve for x: 2x + 5 = 13", answer: 4 },
-                  { id: "2", question: "What is 15% of 80?", answer: 12 },
-                  { id: "3", question: "If y = 3x - 2 and x = 5, what is y?", answer: 13 }
+                  { 
+                    id: "1", 
+                    question: transformedActivity.problemStatement || "Math problem", 
+                    answer: 0 
+                  }
                 ]
               };
-            } else {
+            } else if (transformedActivity.type === 'Logical') {
+              // Create SINGLE logic question based on activity's problem statement
               transformedActivity.content = {
                 logic: [
-                  { id: "1", question: "What comes next in the sequence: 2, 6, 18, 54, ?", type: "text" as const, answer: "162" },
-                  { id: "2", question: "If all cats are animals and some animals are pets, which is true?", type: "multiple-choice" as const, options: ["All cats are pets", "Some cats might be pets", "No cats are pets", "All pets are cats"], answer: "Some cats might be pets" }
+                  { 
+                    id: "1", 
+                    question: transformedActivity.problemStatement || "Logic problem", 
+                    type: "text" as const, 
+                    answer: "" 
+                  }
                 ]
               };
             }
@@ -218,6 +233,7 @@ const ActivityDetail = () => {
   };
 
   const handleSubmit = async (answers: any) => {
+    console.log('qqqqqqqqqqqqqq:', answers,activity);
     if (!token || !activity || !id) return;
     
     const endTime = new Date();
@@ -226,7 +242,7 @@ const ActivityDetail = () => {
     console.log('Activity:', activity);
     console.log('Submitting answers:', answers);
     
-    // Execute validation function from activity
+    // Execute validation function(s) from activity - handle multiple questions
     let validationResult;
     try {
       if (!activity.validation_function) {
@@ -234,62 +250,187 @@ const ActivityDetail = () => {
         throw new Error("No validation function available");
       }
       
-      console.log('Validation function:', activity.validation_function);
+      console.log('Validation function(s):', activity.validation_function);
+      console.log('Submitting answers for validation:', answers);
       
-      // Extract the expected answer by executing the stored function
-      const getExpectedAnswer = new Function(`
-        ${activity.validation_function}
-        return calculateAnswer();
-      `);
+      // Check if we have multiple validation functions (JSON format)
+      let validationFunctions;
+      try {
+        validationFunctions = JSON.parse(activity.validation_function);
+        console.log('Parsed multiple validation functions:', validationFunctions);
+      } catch {
+        // Single validation function (legacy format)
+        validationFunctions = null;
+      }
       
-      // Get the expected answer
-      const expectedAnswer = getExpectedAnswer();
-      console.log('Expected answer:', expectedAnswer);
+      if (validationFunctions && typeof validationFunctions === 'object') {
+        // Multiple questions - validate each answer with its corresponding function
+        const questionResults = {};
+        let totalCorrect = 0;
+        let totalQuestions = 0;
+        let overallFeedback = [];
+        
+        for (const [questionId, validationCode] of Object.entries(validationFunctions)) {
+          if (answers.hasOwnProperty(questionId)) {
+            totalQuestions++;
+            
+            try {
+              // Get input example and expected output from activity
+              const inputExample = activity.content.math[Number(questionId)-1].input_example;
+              const expectedOutput = activity.expected_output;
+
+              // Create function to validate answer
+              const validateAnswer = new Function(`
+                ${validationCode}
+                 const funcName = ${validationCode};
+            return eval(funcName);
+              `);
+              const actualAnswer = validateAnswer()(inputExample);
+              const expectedAnswer = actualAnswer;
+              
+              // Get user's answer for this specific question
+              const userAnswer = answers[questionId];
+              const userNum = typeof userAnswer === 'string' ? parseFloat(userAnswer) : userAnswer;
+              const expectedNum = typeof expectedAnswer === 'string' ? parseFloat(expectedAnswer) : expectedAnswer;
+              
+              const isCorrect = !isNaN(userNum) && !isNaN(actualAnswer) && Math.abs(userNum - actualAnswer) < 0.0001;
+              
+              questionResults[questionId] = {
+                is_correct: isCorrect,
+                user_answer: userAnswer,
+                expected_answer: expectedAnswer
+              };
+              
+              if (isCorrect) {
+                totalCorrect++;
+                overallFeedback.push(`Question ${questionId}: Correct!`);
+              } else {
+                overallFeedback.push(`Question ${questionId}: Incorrect.`);
+              }
+              
+              console.log(`Question ${questionId}: User: ${userNum}, Expected: ${expectedNum}, Correct: ${isCorrect}`);
+              
+            } catch (error) {
+              console.error(`Error validating question ${questionId}:`, error);
+              questionResults[questionId] = {
+                is_correct: false,
+                error: error.message
+              };
+              overallFeedback.push(`Question ${questionId}: Validation error.`);
+            }
+          }
+        }
+        
+        // Overall result
+        const overallCorrect = totalCorrect === totalQuestions && totalQuestions > 0;
+        const scorePercentage = totalQuestions > 0 ? (totalCorrect / totalQuestions) * 100 : 0;
+        
+        validationResult = {
+          is_correct: overallCorrect,
+          feedback: `Score: ${totalCorrect}/${totalQuestions} (${scorePercentage.toFixed(1)}%) - ${overallFeedback.join(' ')}`,
+          confidence_score: scorePercentage / 100,
+          metadata: {
+            question_results: questionResults,
+            total_correct: totalCorrect,
+            total_questions: totalQuestions
+          }
+        };
+        
+      } else {
+        // Single question validation (legacy)
+              // Get validation functions and test cases from enhanced ui_config
+      let finalValidationFunction = activity.validation_function;
+      let validationTests = [];
+      let inputExamples = [];
+      let expectedOutputs = [];
       
-      // Create validation function
-      const validateFn = new Function('params', `
-        try {
+      // Try to get validation data from ui_config
+      if (activity.content?.validation_data) {
+        validationTests = activity.content.validation_data.test_cases || [];
+        inputExamples = activity.content.validation_data.input_examples || [];
+        expectedOutputs = activity.content.validation_data.expected_outputs || [];
+      }
+        
+        // Create validation function that uses test cases
+        finalValidationFunction = `
           function evaluate(params) {
-            const { submission } = params;
-            const expectedAnswer = ${expectedAnswer}; // Use the extracted answer
-            
-            console.log('Comparing submission:', submission['1'], 'with expected:', expectedAnswer);
-            const isCorrect = submission && submission['1'] === expectedAnswer;
-            
-            return {
-              is_correct: isCorrect,
-              feedback: isCorrect ? 'Correct! Well done!' : 'Not quite right. Try again.',
-              confidence_score: isCorrect ? 1.0 : 0.0
-            };
+            try {
+              const { submission } = params;
+              
+              // Get validation tests
+              const validationTests = ${JSON.stringify(validationTests)};
+              
+              // Run all test cases
+              const testResults = validationTests.map(test => {
+                try {
+                  // Execute the actual validation function for each test
+                  ${activity.validation_function}
+                  const actualOutput = calculateAnswer(test.input);
+                  const expectedOutput = test.expectedOutput;
+                  
+                  // Compare with expected output
+                  const isCorrect = Math.abs(actualOutput - expectedOutput) < 0.0001;
+                  return { isCorrect, input: test.input, expected: expectedOutput, actual: actualOutput };
+                } catch (e) {
+                  return { isCorrect: false, error: e.message };
+                }
+              });
+              
+              // Check user's answer against their test case
+              let userAnswer;
+              if (typeof submission === 'object') {
+                const keys = Object.keys(submission);
+                if (keys.length > 0) {
+                  userAnswer = submission[keys[0]];
+                }
+              } else {
+                userAnswer = submission;
+              }
+              
+              // Convert to number for comparison
+              const userNum = typeof userAnswer === 'string' ? parseFloat(userAnswer) : userAnswer;
+              
+              // Find matching test case for user's answer
+              const matchingTest = testResults.find(test => 
+                Math.abs(test.actual - userNum) < 0.0001
+              );
+              
+              const isCorrect = Boolean(matchingTest?.isCorrect);
+              
+              // Calculate confidence based on test case results
+              const passedTests = testResults.filter(t => t.isCorrect).length;
+              const confidence = passedTests / testResults.length;
+              
+              return {
+                is_correct: isCorrect,
+                feedback: isCorrect ? 'Correct! Well done!' : 'Not quite right. Please try again.',
+                confidence_score: confidence,
+                metadata: {
+                  test_results: testResults,
+                  passed_tests: passedTests,
+                  total_tests: testResults.length
+                }
+              };
+            } catch (error) {
+              console.error('Validation error:', error);
+              return {
+                is_correct: false,
+                feedback: "Error in validation: " + error.message,
+                confidence_score: 0
+              };
+            }
           }
           
-          return evaluate(params);
-        } catch (error) {
-          console.error('Validation function error:', error);
-          return {
-            is_correct: false,
-            feedback: "Error in validation: " + error.message,
-            confidence_score: 0
-          };
-        }
-      `);
+          return evaluate(arguments[0]);
+        `;
+        
+        validationResult = ValidationService.executeValidation(finalValidationFunction, {
+          submission: answers,
+          global_context_variables: { attempt_number: 1 }
+        });
+      }
       
-      // Execute the validation
-      validationResult = validateFn({
-        submission: answers,
-        global_context_variables: { attempt_number: 1 }
-      });
-      
-      console.log('Raw validation result:', validationResult);
-      
-      // Ensure we have a valid result object
-      validationResult = {
-        is_correct: Boolean(validationResult?.is_correct),
-        feedback: String(validationResult?.feedback || 'No feedback provided'),
-        confidence_score: Number(validationResult?.confidence_score || 0)
-      };
-      
-      console.log('Processed validation result:', validationResult);
+      console.log('Final validation result:', validationResult);
       
     } catch (error) {
       console.error('Error executing validation function:', error);
@@ -300,12 +441,26 @@ const ActivityDetail = () => {
       };
     }
     
-    const result = {
-      score: {
+    // Calculate score based on validation result
+    let scoreData;
+    if (validationResult.metadata && validationResult.metadata.total_questions) {
+      // Multiple questions
+      scoreData = {
+        correct: validationResult.metadata.total_correct,
+        total: validationResult.metadata.total_questions,
+        percentage: (validationResult.metadata.total_correct / validationResult.metadata.total_questions) * 100
+      };
+    } else {
+      // Single question
+      scoreData = {
         correct: validationResult.is_correct ? 1 : 0,
         total: 1,
         percentage: validationResult.is_correct ? 100 : 0
-      },
+      };
+    }
+
+    const result = {
+      score: scoreData,
       timeSpent,
       userAnswers: answers,
       feedback: validationResult.feedback || (validationResult.is_correct ? 'Correct!' : 'Incorrect. Try again.')
@@ -317,7 +472,7 @@ const ActivityDetail = () => {
         submission: answers,
         time_spent_seconds: timeSpent,
         is_correct: validationResult.is_correct,
-        score_percentage: validationResult.is_correct ? 100 : 0,
+        score_percentage: scoreData.percentage,
         feedback: validationResult.feedback,
         confidence_score: validationResult.confidence_score || 0
       }, token);
@@ -340,6 +495,31 @@ const ActivityDetail = () => {
       });
     }
   };
+
+  const handleSubmit_ = async (answers: any) => {
+    const answerMap={}
+    const validation_function = JSON.parse(activity.validation_function);
+
+    for (const key in answers){
+      const validateAnswer = new Function(`
+        ${validation_function[key]}
+        
+        // Find the function name dynamically
+        const funcName = ${validation_function[key]};
+            return eval(funcName);
+        
+    `);
+    const input_example = activity.content.math[Number(key)-1].input_example;
+      const actualAnswer = validateAnswer()(input_example);
+      const compareAnswer=actualAnswer==answers[key];
+
+      console.log('aaaaaaaaaaaaaaaaaaaaa:', actualAnswer,compareAnswer,answers[key]);
+
+
+    }
+
+
+  }
 
   const handleTryAgain = () => {
     setIsSubmitted(false);

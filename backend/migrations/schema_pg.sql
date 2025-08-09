@@ -30,7 +30,14 @@ CREATE TABLE IF NOT EXISTS activities (
     ui_config            JSONB,
     validation_function  TEXT,
     correct_answers      JSONB,
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    input_example       JSONB,
+    expected_output     JSONB,
+    validation_tests    JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Create indexes for JSONB columns
+    CONSTRAINT activity_input_example_idx UNIQUE (id) INCLUDE (input_example),
+    CONSTRAINT activity_validation_tests_idx UNIQUE (id) INCLUDE (validation_tests)
 
     -- If you want referential integrity, uncomment the FK below and ensure users exist first
     -- ,CONSTRAINT fk_activities_user
@@ -64,6 +71,30 @@ CREATE INDEX IF NOT EXISTS idx_attempts_activity_id ON attempts(activity_id);
 
 -- Additional helpful indexes
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- Code Generations table (for tracking LLM-generated questions and test cases)
+CREATE TABLE IF NOT EXISTS code_generations (
+    id                  VARCHAR PRIMARY KEY,
+    user_id             VARCHAR,
+    type                VARCHAR,
+    user_query          TEXT NOT NULL,
+    generated_code      TEXT NOT NULL,
+    generated_question  TEXT NOT NULL,
+    input_example       JSONB,
+    expected_output     JSONB,
+    validation_tests    JSONB,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Add comments for new fields
+COMMENT ON COLUMN code_generations.input_example IS 'Example input parameters as JSON object';
+COMMENT ON COLUMN code_generations.expected_output IS 'Expected output for the input example';
+COMMENT ON COLUMN code_generations.validation_tests IS 'Array of 10 test cases for validation';
+
+-- Create indexes for JSONB fields and user lookups
+CREATE INDEX IF NOT EXISTS idx_code_generations_user_id ON code_generations(user_id);
+CREATE INDEX IF NOT EXISTS idx_code_generations_input_example ON code_generations USING GIN (input_example);
+CREATE INDEX IF NOT EXISTS idx_code_generations_validation_tests ON code_generations USING GIN (validation_tests);
 
 -- Done
 

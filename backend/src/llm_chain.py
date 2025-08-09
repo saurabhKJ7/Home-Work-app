@@ -3,17 +3,26 @@ import json
 import re
 from typing import Dict, Any, List
 from langchain_anthropic import ChatAnthropic
-from langchain.chains import LLMChain
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
+from langchain.schema.runnable import RunnablePassthrough
 from dotenv import load_dotenv
 from e2b import Sandbox
 load_dotenv()
 
 from pydantic import BaseModel, Field
+from typing import List, Dict, Any
+
+class TestCase(BaseModel):
+    input: Dict[str, Any] = Field(description="Input parameters for the test case")
+    expectedOutput: Any = Field(description="Expected output for this input")
+
 class StructuredOutput(BaseModel):
     question: str = Field(description="The specific math problem to solve with concrete values")
-    code: str = Field(description="function calculateAnswer(input) { // JavaScript code that solves this specific problem }")
+    code: str = Field(description="Complete JavaScript function that solves this specific problem")
+    inputExample: Dict[str, Any] = Field(description="Example input parameters as JSON object")
+    expectedOutput: Any = Field(description="Expected output for the input example")
+    validationTests: List[TestCase] = Field(description="Array of 10 test cases to verify correctness")
 
 
 LANGSMITH_TRACING="true"
@@ -92,42 +101,59 @@ def get_evaluate_function(rag_data, user_prompt):
     template = """
 You are an educational content generation system that creates math problems and their solution code.
 Your output must be in the following JSON format:
-
 {format_instructions}
-
 Examples:
 {rag_data_str}
-
-Task:
-Create a specific math problem (not a coding task) and JavaScript function that fulfills this request: {user_prompt}
-
-IMPORTANT: The question must be a specific math problem with concrete values that has a numerical answer, NOT a request to write code.
-
-GOOD EXAMPLES:
+Given a user prompt, your job is to generate:
+1. A specific, concrete **math question** with actual numeric values and a well-defined numerical answer.
+2. A **JavaScript function** that solves this math problem.
+3. The function must include:
+    - Function name
+    - Properly named parameters
+    - An input example (as a JSON object)
+    - The expected output for that input
+    - Validation logic or test case section containing exactly **10 test cases** in the format:
+        [
+          {{ "input": ..., "expectedOutput": ... }},
+          ...
+        ]
+USER QUERY: "{user_prompt}"
+IMPORTANT RULES:
+- :white_check_mark: The question must be a **concrete math problem**, not a general request for a function.
+- :white_check_mark: The JavaScript function must directly solve that problem and return the correct result.
+- :white_check_mark: The "code" field must contain **only** the complete function definition — no example calls, no console.log statements, and no usage comments.
+- :white_check_mark: Include a matching inputExample and expectedOutput as part of the structured JSON.
+- :white_check_mark: The validationTests array must contain **10 diverse and valid test cases** to verify correctness.
+- :x: Do NOT return abstract tasks like "Write a function to calculate area."
+- :x: Do NOT return a generic utility function.
+- :x: Do NOT include any extra explanation, markdown, or natural language outside the JSON object.
+GOOD QUESTION EXAMPLES:
 - "What is the product of 8 and 12?"
 - "What is the value of matrix multiplication of [[1,2],[2,3]] and [[3,8],[5,9]]?"
 - "If a triangle has sides of length 3, 4, and 5, what is its area?"
-
-BAD EXAMPLES:
+BAD QUESTION EXAMPLES:
 - "Write a JavaScript function that performs matrix multiplication"
 - "Create a function to calculate the area of a triangle"
-
-Output format:
-{format_instructions}
-
-Ensure your output ONLY contains the JSON object as shown above.
+Your output must strictly follow the JSON format described above.
 """
     prompt = PromptTemplate(
         template=template,
-        input_variables=["rag_data_str", "user_prompt", "format_instructions"]
+        input_variables=["rag_data_str", "user_prompt", "format_instructions", "input"],
+        partial_variables={"input": ""}  # Provide a default empty value for the input variable
     )
-    chain = LLMChain(llm=llm, prompt=prompt, output_parser=parser)
+    chain = (
+        {"rag_data_str": RunnablePassthrough(), "user_prompt": RunnablePassthrough(), "format_instructions": RunnablePassthrough(), "input": RunnablePassthrough()}
+        | prompt
+        | llm
+        | parser
+    )
     result = chain.invoke({
         "rag_data_str": rag_data_str,
         "user_prompt": user_prompt,
-        "format_instructions": format_instructions
+        "format_instructions": format_instructions,
+        "input": ""  # Provide empty string for input
     })
-    return result["text"]
+    return result
 
 
 def feedback_function(original_prompt, generated_function, test_cases, expected_outcomes):

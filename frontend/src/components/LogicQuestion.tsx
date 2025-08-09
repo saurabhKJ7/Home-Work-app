@@ -76,17 +76,15 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
                         <RadioGroupItem 
                           value={option} 
                           id={`${problem.id}-${optionIndex}`}
-                          className={showResults ? (
-                            option === problem.answer.toString()
+                          className={showResults && answers[problem.id] === option ? (
+                            isCorrect(problem.id) 
                               ? "border-success text-success"
-                              : answers[problem.id] === option && option !== problem.answer.toString()
-                              ? "border-destructive text-destructive"
-                              : ""
+                              : "border-destructive text-destructive"
                           ) : ""}
                         />
                         <Label 
                           htmlFor={`${problem.id}-${optionIndex}`}
-                          className={`cursor-pointer ${showResults && option === problem.answer.toString() ? 'text-success font-medium' : ''}`}
+                          className="cursor-pointer"
                         >
                           {option}
                         </Label>
@@ -109,11 +107,7 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
                         : "border-destructive bg-destructive/5"
                     ) : ""}
                   />
-                  {showResults && !isCorrect(problem.id) && (
-                    <span className="text-success font-medium">
-                      Correct: {problem.answer}
-                    </span>
-                  )}
+
                 </div>
               )}
             </CardContent>
