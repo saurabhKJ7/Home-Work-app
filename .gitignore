@@ -6,7 +6,8 @@ node_modules/
 node_modules
 .cursor
 .cursor/
-_pycache_
+_pycache
+_pycache/
 _pycache_/
 __pycache__
 __pycache__/

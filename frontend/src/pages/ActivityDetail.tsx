@@ -233,7 +233,8 @@ const ActivityDetail = () => {
   };
 
   const handleSubmit = async (answers: any) => {
-    console.log('qqqqqqqqqqqqqq:', answers,activity);
+    console.log('[Submit] User answers:', answers);
+    console.log('[Submit] Activity payload:', activity);
     if (!token || !activity || !id) return;
     
     const endTime = new Date();
@@ -250,24 +251,28 @@ const ActivityDetail = () => {
         throw new Error("No validation function available");
       }
       
-      console.log('Validation function(s):', activity.validation_function);
-      console.log('Submitting answers for validation:', answers);
+      console.log('[Submit] Validation function(s) string (may be single or JSON of many):', activity.validation_function);
+      console.log('[Submit] Submitting answers for validation:', answers);
       
       // Check if we have multiple validation functions (JSON format)
       let validationFunctions;
       try {
         validationFunctions = JSON.parse(activity.validation_function);
         console.log('Parsed multiple validation functions:', validationFunctions);
-      } catch {
+      } catch (error) {
+        console.log('error:', error);
         // Single validation function (legacy format)
         validationFunctions = null;
       }
+
       
       if (validationFunctions && typeof validationFunctions === 'object') {
         // Multiple questions - validate each answer with its corresponding function
-        const questionResults = {};
+        const questionResults = {} as any;
         let totalCorrect = 0;
         let totalQuestions = 0;
+        let totalTests = 0;
+        let totalTestsPassed = 0;
         let overallFeedback = [];
         
         for (const [questionId, validationCode] of Object.entries(validationFunctions)) {
@@ -276,8 +281,12 @@ const ActivityDetail = () => {
             
             try {
               // Get input example and expected output from activity
-              const inputExample = activity.content.math[Number(questionId)-1].input_example;
-              const expectedOutput = activity.expected_output;
+              const questionIdx = Number(questionId) - 1;
+              const questionNode = (activity.content?.math || activity.content?.logic)?.[questionIdx] || {};
+              const inputExample = questionNode.input_example;
+              const questionValidationTests = questionNode.validation_tests || [];
+              console.log(`[Submit] Q${questionId} input_example:`, inputExample);
+              console.log(`[Submit] Q${questionId} validation_tests:`, questionValidationTests);
 
               // Create function to validate answer
               const validateAnswer = new Function(`
@@ -287,6 +296,7 @@ const ActivityDetail = () => {
               `);
               const actualAnswer = validateAnswer()(inputExample);
               const expectedAnswer = actualAnswer;
+              console.log(`[Submit] Q${questionId} evaluated expectedAnswer from code:`, expectedAnswer);
               
               // Get user's answer for this specific question
               const userAnswer = answers[questionId];
@@ -294,11 +304,39 @@ const ActivityDetail = () => {
               const expectedNum = typeof expectedAnswer === 'string' ? parseFloat(expectedAnswer) : expectedAnswer;
               
               const isCorrect = !isNaN(userNum) && !isNaN(actualAnswer) && Math.abs(userNum - actualAnswer) < 0.0001;
+              // Evaluate LLM-provided validation tests for this question using the generated function
+              let passedCountForQuestion = 0;
+              let testsCountForQuestion = 0;
+              const testDetails: Array<{ input: any; expected: any; actual: any; passed: boolean }> = [];
+              if (Array.isArray(questionValidationTests) && questionValidationTests.length > 0) {
+                const runFunc = validateAnswer();
+                for (const t of questionValidationTests) {
+                  try {
+                    const out = runFunc(t.input);
+                    const pass = Math.abs(out - t.expectedOutput) < 0.0001;
+                    totalTests++;
+                    testsCountForQuestion++;
+                    if (pass) { passedCountForQuestion++; totalTestsPassed++; }
+                    testDetails.push({ input: t.input, expected: t.expectedOutput, actual: out, passed: pass });
+                  } catch (err) {
+                    console.warn(`[Submit] Q${questionId} test execution error:`, err);
+                    totalTests++;
+                    testsCountForQuestion++;
+                    testDetails.push({ input: t.input, expected: t.expectedOutput, actual: undefined, passed: false });
+                  }
+                }
+                console.log(`[Submit] Q${questionId} tests passed: ${passedCountForQuestion}/${questionValidationTests.length}`);
+              } else {
+                console.log(`[Submit] Q${questionId} has no validation tests to run.`);
+              }
               
               questionResults[questionId] = {
                 is_correct: isCorrect,
                 user_answer: userAnswer,
-                expected_answer: expectedAnswer
+                expected_answer: expectedAnswer,
+                tests_passed: passedCountForQuestion,
+                tests_total: testsCountForQuestion || (Array.isArray(questionValidationTests) ? questionValidationTests.length : 0),
+                test_details: testDetails
               };
               
               if (isCorrect) {
@@ -308,7 +346,7 @@ const ActivityDetail = () => {
                 overallFeedback.push(`Question ${questionId}: Incorrect.`);
               }
               
-              console.log(`Question ${questionId}: User: ${userNum}, Expected: ${expectedNum}, Correct: ${isCorrect}`);
+              console.log(`[Submit] Q${questionId}: User=${userNum}, Expected=${expectedNum}, Correct=${isCorrect}`);
               
             } catch (error) {
               console.error(`Error validating question ${questionId}:`, error);
@@ -327,12 +365,14 @@ const ActivityDetail = () => {
         
         validationResult = {
           is_correct: overallCorrect,
-          feedback: `Score: ${totalCorrect}/${totalQuestions} (${scorePercentage.toFixed(1)}%) - ${overallFeedback.join(' ')}`,
+          feedback: `Score: ${totalCorrect}/${totalQuestions} (${scorePercentage.toFixed(1)}%) - ${overallFeedback.join(' ')}. Tests passed: ${totalTestsPassed}/${totalTests}`,
           confidence_score: scorePercentage / 100,
           metadata: {
             question_results: questionResults,
             total_correct: totalCorrect,
-            total_questions: totalQuestions
+            total_questions: totalQuestions,
+            total_tests: totalTests,
+            total_tests_passed: totalTestsPassed
           }
         };
         
@@ -430,7 +470,7 @@ const ActivityDetail = () => {
         });
       }
       
-      console.log('Final validation result:', validationResult);
+      console.log('[Submit] Final validation result:', validationResult);
       
     } catch (error) {
       console.error('Error executing validation function:', error);
@@ -459,12 +499,29 @@ const ActivityDetail = () => {
       };
     }
 
+    // Derive per-question tests map for UI
+    const perQuestionTests: Record<string, { passed: number; total: number }> = {};
+    const perQuestionTestDetails: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>> = {};
+    if (validationResult?.metadata?.question_results) {
+      for (const [qid, info] of Object.entries(validationResult.metadata.question_results as any)) {
+        perQuestionTests[qid] = { passed: (info as any).tests_passed || 0, total: (info as any).tests_total || 0 };
+        if ((info as any).test_details) {
+          perQuestionTestDetails[qid] = (info as any).test_details as any;
+        }
+      }
+    }
+
     const result = {
       score: scoreData,
       timeSpent,
       userAnswers: answers,
-      feedback: validationResult.feedback || (validationResult.is_correct ? 'Correct!' : 'Incorrect. Try again.')
+      feedback: validationResult.feedback || (validationResult.is_correct ? 'Correct!' : 'Incorrect. Try again.'),
+      testsPassed: validationResult?.metadata?.total_tests_passed,
+      totalTests: validationResult?.metadata?.total_tests,
+      perQuestionTests,
+      perQuestionTestDetails
     };
+    console.log('[Submit] Summary:', result);
 
     try {
       // Submit attempt with validation results to the database
@@ -482,7 +539,7 @@ const ActivityDetail = () => {
 
       toast({
         title: "Assignment Submitted!",
-        description: `You scored ${result.score.percentage}% - ${result.feedback}`,
+        description: `You scored ${result.score.percentage}% - ${result.feedback} ${typeof result.testsPassed === 'number' ? `(Tests passed: ${result.testsPassed}/${result.totalTests})` : ''}`,
         variant: result.score.percentage >= 60 ? "default" : "destructive"
       });
       
@@ -679,6 +736,8 @@ const ActivityDetail = () => {
                 isReadOnly={isSubmitted}
                 showResults={isSubmitted}
                 userAnswers={submissionResult?.userAnswers}
+                perQuestionTests={submissionResult?.perQuestionTests}
+                perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
               />
             )}
 
@@ -689,6 +748,8 @@ const ActivityDetail = () => {
                 isReadOnly={isSubmitted}
                 showResults={isSubmitted}
                 userAnswers={submissionResult?.userAnswers}
+                perQuestionTests={submissionResult?.perQuestionTests}
+                perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
               />
             )}
           </CardContent>

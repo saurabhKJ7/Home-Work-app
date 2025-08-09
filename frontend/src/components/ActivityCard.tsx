@@ -20,10 +20,11 @@ export interface Activity {
 
 interface ActivityCardProps {
   activity: Activity;
-  onStart: (id: string) => void;
+  onStart?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }
 
-const ActivityCard = ({ activity, onStart }: ActivityCardProps) => {
+const ActivityCard = ({ activity, onStart, onDelete }: ActivityCardProps) => {
   const getDifficultyIcon = () => {
     switch (activity.difficulty) {
       case 'Easy':
@@ -95,13 +96,23 @@ const ActivityCard = ({ activity, onStart }: ActivityCardProps) => {
             <span>Best Score: {activity.best_score}%</span>
           </div>
         )}
-        <Button
-          variant={activity.is_completed ? "outline" : "default"}
-          onClick={() => onStart(activity.id)}
-          className="w-full"
-        >
-          {activity.is_completed ? "Review Activity" : "Start Activity"}
-        </Button>
+        {onDelete ? (
+          <Button
+            variant="outline"
+            onClick={() => onDelete(activity.id)}
+            className="w-full"
+          >
+            Delete Activity
+          </Button>
+        ) : (
+          <Button
+            variant={activity.is_completed ? "outline" : "default"}
+            onClick={() => onStart && onStart(activity.id)}
+            className="w-full"
+          >
+            {activity.is_completed ? "Review Activity" : "Start Activity"}
+          </Button>
+        )}
       </CardFooter>
     </Card>
   );

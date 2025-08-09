@@ -12,6 +12,9 @@ interface LogicProblem {
   type: 'text' | 'multiple-choice';
   options?: string[];
   answer: string | number;
+  input_example?: any;
+  expected_output?: any;
+  validation_tests?: Array<{ input: any; expectedOutput: any }>;
 }
 
 interface LogicQuestionProps {
@@ -20,9 +23,11 @@ interface LogicQuestionProps {
   isReadOnly?: boolean;
   showResults?: boolean;
   userAnswers?: { [key: string]: string | number };
+  perQuestionTests?: Record<string, { passed: number; total: number }>;
+  perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
 }
 
-const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, userAnswers = {} }: LogicQuestionProps) => {
+const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {} }: LogicQuestionProps) => {
   const [answers, setAnswers] = useState<{ [key: string]: string | number }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string | number) => {
@@ -108,6 +113,23 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
                     ) : ""}
                   />
 
+                </div>
+              )}
+              {showResults && (
+                <div className="text-sm text-muted-foreground">
+                  Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? (problem.validation_tests?.length || 0)}
+                </div>
+              )}
+              {showResults && perQuestionTestDetails[problem.id] && (
+                <div className="mt-2 border rounded-md p-2 bg-muted/30">
+                  <div className="text-xs font-medium mb-1">Test details</div>
+                  <ul className="space-y-1 text-xs">
+                    {perQuestionTestDetails[problem.id]!.map((d, idx) => (
+                      <li key={idx} className={d.passed ? 'text-success' : 'text-destructive'}>
+                        <span className="font-semibold">{d.passed ? 'PASS' : 'FAIL'}</span>: expected {JSON.stringify(d.expected)} got {JSON.stringify(d.actual)} for input {JSON.stringify(d.input)}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </CardContent>

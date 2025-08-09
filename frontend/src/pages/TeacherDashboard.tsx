@@ -146,6 +146,84 @@ const TeacherDashboard = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Helpers to evaluate validation tests in preview
+  const deepEqual = (a: any, b: any): boolean => {
+    if (typeof a === 'number' && typeof b === 'number') {
+      return Math.abs(a - b) < 1e-6;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (!deepEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      const aKeys = Object.keys(a);
+      const bKeys = Object.keys(b);
+      if (aKeys.length !== bKeys.length) return false;
+      for (const k of aKeys) {
+        if (!deepEqual(a[k], b[k])) return false;
+      }
+      return true;
+    }
+    return String(a) === String(b);
+  };
+
+  const extractFunctionMeta = (code: string): { name: string; params: string[] } => {
+    let name = 'calculateAnswer';
+    let params: string[] = [];
+    const fnMatch = code.match(/function\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/);
+    if (fnMatch) {
+      name = fnMatch[1];
+      params = fnMatch[2].split(',').map(s => s.trim()).filter(Boolean);
+      return { name, params };
+    }
+    const arrowMatch = code.match(/const\s+([a-zA-Z0-9_]+)\s*=\s*\(([^)]*)\)\s*=>/);
+    if (arrowMatch) {
+      name = arrowMatch[1];
+      params = arrowMatch[2].split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return { name, params };
+  };
+
+  const runTestsForQuestion = (
+    code: string,
+    tests: any[] = [],
+    inputExample?: any
+  ): { passed: number; total: number; details: Array<{ input: any; expected: any; actual: any; passed: boolean }> } => {
+    try {
+      const { name, params } = extractFunctionMeta(code);
+      const fn: any = new Function(`${code}; return ${name};`)();
+      const callWithInput = (input: any) => {
+        if (params.length > 1 && input && typeof input === 'object' && !Array.isArray(input)) {
+          const args = params.map(p => input[p]);
+          return fn(...args);
+        }
+        return fn(input);
+      };
+      let passed = 0;
+      let total = 0;
+      const details: Array<{ input: any; expected: any; actual: any; passed: boolean }> = [];
+      for (const t of tests) {
+        total++;
+        try {
+          const out = callWithInput(t.input);
+          const ok = deepEqual(out, t.expectedOutput);
+          if (ok) passed++;
+          details.push({ input: t.input, expected: t.expectedOutput, actual: out, passed: ok });
+        } catch (e) {
+          console.warn('[Generate][Preview] Test execution error:', e);
+          details.push({ input: t.input, expected: t.expectedOutput, actual: undefined, passed: false });
+        }
+      }
+      return { passed, total, details };
+    } catch (e) {
+      console.warn('[Generate][Preview] Unable to evaluate tests for question:', e);
+      return { passed: 0, total: Array.isArray(tests) ? tests.length : 0, details: [] };
+    }
+  };
+
   const handleGenerateActivity = async () => {
     if (!formData.title || !formData.type || !formData.difficulty) {
       toast({
@@ -175,10 +253,17 @@ const TeacherDashboard = () => {
         },
         token
       );
+      console.log('[Generate] Raw response from /generate-code:', data);
       
       // Handle new response format with multiple questions
       const questions = data?.questions || [];
       const totalQuestions = data?.total_questions || 1;
+      console.log(`[Generate] Received ${questions.length} question(s). Example first question:`, questions[0]);
+      if (questions[0]?.validation_tests) {
+        console.log('[Generate] Sample validation tests for Q1:', questions[0].validation_tests);
+      } else {
+        console.log('[Generate] No validation tests found on Q1 payload');
+      }
       
       if (questions.length === 0) {
         throw new Error("No questions were generated");
@@ -194,7 +279,10 @@ const TeacherDashboard = () => {
             question: q.question,
             answer: 0, // Will be calculated from validation function
             code: q.code,
-            question_id: q.question_id
+            question_id: q.question_id,
+            input_example: q.input_example,
+            expected_output: q.expected_output,
+            validation_tests: q.validation_tests
           }))
         };
       } else if (formData.type === 'Logical') {
@@ -205,7 +293,10 @@ const TeacherDashboard = () => {
             type: "text" as const,
             answer: "",
             code: q.code,
-            question_id: q.question_id
+            question_id: q.question_id,
+            input_example: q.input_example,
+            expected_output: q.expected_output,
+            validation_tests: q.validation_tests
           }))
         };
       }
@@ -213,6 +304,7 @@ const TeacherDashboard = () => {
       // Store all questions for activity creation
       previewContent.questions = questions;
       previewContent.totalQuestions = totalQuestions;
+      console.log('[Generate] Preview content composed:', previewContent);
 
       const newPreview = {
         ...formData,
@@ -221,6 +313,25 @@ const TeacherDashboard = () => {
         content: previewContent,
         questions: questions
       };
+      // Compute per-question test pass counts for preview
+      const perQuestionTests: Record<string, { passed: number; total: number }> = {};
+      const perQuestionTestDetails: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>> = {};
+      if (formData.type === 'Mathematical' && previewContent.math) {
+        for (const item of previewContent.math) {
+          const res = runTestsForQuestion(item.code, item.validation_tests, item.input_example);
+          perQuestionTests[item.id] = { passed: res.passed, total: res.total };
+          perQuestionTestDetails[item.id] = res.details;
+        }
+      } else if (formData.type === 'Logical' && previewContent.logic) {
+        for (const item of previewContent.logic) {
+          const res = runTestsForQuestion(item.code, item.validation_tests, item.input_example);
+          perQuestionTests[item.id] = { passed: res.passed, total: res.total };
+          perQuestionTestDetails[item.id] = res.details;
+        }
+      }
+      (newPreview as any).perQuestionTests = perQuestionTests;
+      (newPreview as any).perQuestionTestDetails = perQuestionTestDetails;
+      console.log('[Generate] New preview object:', newPreview);
 
       // For single question, set problem statement to the question
       if (questions.length === 1) {
@@ -489,17 +600,23 @@ const TeacherDashboard = () => {
 
                       {previewActivity.type === 'Mathematical' && (
                         <MathQuestion 
-                          problems={previewActivity.content.math} 
+                          problems={previewActivity.content.math}
                           onSubmit={() => {}} 
-                          isReadOnly 
+                          isReadOnly
+                          showResults
+                          perQuestionTests={previewActivity.perQuestionTests}
+                          perQuestionTestDetails={previewActivity.perQuestionTestDetails}
                         />
                       )}
 
                       {previewActivity.type === 'Logical' && (
                         <LogicQuestion 
-                          problems={previewActivity.content.logic} 
+                          problems={previewActivity.content.logic}
                           onSubmit={() => {}} 
-                          isReadOnly 
+                          isReadOnly
+                          showResults
+                          perQuestionTests={previewActivity.perQuestionTests}
+                          perQuestionTestDetails={previewActivity.perQuestionTestDetails}
                         />
                       )}
 
@@ -577,7 +694,6 @@ const TeacherDashboard = () => {
                       <ActivityCard
                         key={activity.id}
                         activity={activity}
-                        isTeacherView
                         onDelete={handleDeleteActivity}
                       />
                     ))}
