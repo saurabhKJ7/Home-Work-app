@@ -4,6 +4,7 @@ Improved RAG system for better retrieval of similar validation scenarios
 from typing import List, Dict, Any
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
+from rank_bm25 import BM25Okapi
 from src.retrieval import get_embeddings, retrieve_similar_examples
 
 def get_weighted_examples(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -20,21 +21,38 @@ def get_weighted_examples(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     # Get embeddings for the query
     query_vector = get_embeddings(query)
     
-    # Retrieve similar examples
+    # Retrieve top-k via vector similarity
     matches = retrieve_similar_examples(query_vector, top_k=top_k)
-    
-    # Add weights based on similarity scores
-    weighted_examples = []
-    for match in matches:
-        example = {
-            "prompt": match.metadata.get("text", ""),
-            "question": match.metadata.get("question", ""),
-            "code": match.metadata.get("code", ""),
-            "weight": match.score  # Similarity score
-        }
-        weighted_examples.append(example)
-    
-    return weighted_examples
+
+    vector_candidates: List[Dict[str, Any]] = []
+    for m in matches:
+        vector_candidates.append({
+            "prompt": m.metadata.get("text", ""),
+            "question": m.metadata.get("question", ""),
+            "code": m.metadata.get("code", ""),
+            "vector_score": float(m.score or 0.0),
+        })
+
+    # BM25 rerank over the union of vector candidates (fallback to vector-only if empty)
+    docs = [ (c.get("prompt", "") + "\n" + c.get("question", "")).strip() for c in vector_candidates ]
+    bm25_scores = [0.0] * len(docs)
+    if docs:
+        tokenized = [d.lower().split() for d in docs]
+        bm25 = BM25Okapi(tokenized)
+        bm25_scores = bm25.get_scores(query.lower().split())
+
+    # Combine scores: simple weighted sum (tunable)
+    alpha = 0.6  # weight for vector similarity
+    beta = 0.4   # weight for BM25 text relevance
+    combined = []
+    for idx, cand in enumerate(vector_candidates):
+        score = alpha * cand["vector_score"] + beta * float(bm25_scores[idx] if idx < len(bm25_scores) else 0.0)
+        combined.append({
+            **cand,
+            "weight": score,
+        })
+
+    return combined
 
 def filter_by_activity_type(examples: List[Dict[str, Any]], activity_type: str) -> List[Dict[str, Any]]:
     """
@@ -86,7 +104,7 @@ def get_enhanced_rag_data(query: str, activity_type: str = None) -> List[Dict[st
     if activity_type:
         examples = filter_by_activity_type(examples, activity_type)
     
-    # Sort by weight (similarity score)
+    # Sort by combined weight
     examples.sort(key=lambda x: x.get("weight", 0), reverse=True)
     
     # Remove weight field before returning
