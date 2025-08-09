@@ -194,7 +194,14 @@ const TeacherDashboard = () => {
     code: string,
     tests: any[] = [],
     inputExample?: any
-  ): { passed: number; total: number; details: Array<{ input: any; expected: any; actual: any; passed: boolean }> } => {
+  ): { passed: number; total: number; details: Array<{ input: any; expected: any; actual: any; passed: boolean }>; metrics: {
+    accuracy_score: number;
+    false_positive_count: number;
+    false_negative_count: number;
+    edge_case_failures: any[];
+    confidence_level: 'high' | 'medium' | 'low';
+    improvement_suggestions: string[];
+  } } => {
     try {
       const { name, params } = extractFunctionMeta(code);
       const fn: any = new Function(`${code}; return ${name};`)();
@@ -221,10 +228,42 @@ const TeacherDashboard = () => {
           details.push({ input: t.input, expected: t.expectedOutput, actual: undefined, passed: false });
         }
       }
-      return { passed, total, details };
+      const failures = details.filter(d => !d.passed);
+      const isEdgeCase = (inp: any) => {
+        if (inp == null) return true;
+        if (Array.isArray(inp)) return inp.length === 0;
+        if (typeof inp === 'object') {
+          const keys = Object.keys(inp);
+          return keys.length === 0 || keys.some(k => (inp as any)[k] == null || (Array.isArray((inp as any)[k]) && (inp as any)[k].length === 0));
+        }
+        if (typeof inp === 'string') return inp.trim() === '';
+        return false;
+      };
+      const edge_case_failures = failures.filter(f => isEdgeCase(f.input));
+      const accuracy = total > 0 ? passed / total : 0;
+      const confidence_level: 'high' | 'medium' | 'low' = accuracy >= 0.9 ? 'high' : accuracy >= 0.7 ? 'medium' : 'low';
+      const improvement_suggestions: string[] = [];
+      if (edge_case_failures.length > 0) improvement_suggestions.push('Add handling for null/empty inputs and malformed shapes');
+      if (failures.length > 0 && edge_case_failures.length !== failures.length) improvement_suggestions.push('Review core logic; some normal cases are failing');
+      if (total === 0) improvement_suggestions.push('No tests available; add at least 5 tests');
+      return { passed, total, details, metrics: {
+        accuracy_score: accuracy,
+        false_positive_count: 0,
+        false_negative_count: failures.length,
+        edge_case_failures,
+        confidence_level,
+        improvement_suggestions,
+      } };
     } catch (e) {
       console.warn('[Generate][Preview] Unable to evaluate tests for question:', e);
-      return { passed: 0, total: Array.isArray(tests) ? tests.length : 0, details: [] };
+      return { passed: 0, total: Math.min(5, Array.isArray(tests) ? tests.length : 0), details: [], metrics: {
+        accuracy_score: 0,
+        false_positive_count: 0,
+        false_negative_count: Math.min(5, Array.isArray(tests) ? tests.length : 0),
+        edge_case_failures: [],
+        confidence_level: 'low',
+        improvement_suggestions: ['Fix runtime errors; tests could not be executed']
+      } };
     }
   };
 
@@ -678,12 +717,27 @@ const TeacherDashboard = () => {
                                         setPreviewActivity((prev: any) => ({
                                           ...prev,
                                           perQuestionTests: { ...(prev?.perQuestionTests || {}), [item.id]: { passed: res.passed, total: res.total } },
-                                          perQuestionTestDetails: { ...(prev?.perQuestionTestDetails || {}), [item.id]: res.details }
+                                          perQuestionTestDetails: { ...(prev?.perQuestionTestDetails || {}), [item.id]: res.details },
+                                          perQuestionMetrics: { ...(prev?.perQuestionMetrics || {}), [item.id]: res.metrics }
                                         }));
                                       }}
                                     >
                                       Run Test Cases
                                     </Button>
+                                    {previewActivity?.perQuestionMetrics?.[item.id] && (
+                                      <div className="mt-2 text-xs text-muted-foreground">
+                                        <div>accuracy_score: {previewActivity.perQuestionMetrics[item.id].accuracy_score?.toFixed ? previewActivity.perQuestionMetrics[item.id].accuracy_score.toFixed(2) : previewActivity.perQuestionMetrics[item.id].accuracy_score}</div>
+                                        <div>false_positive_count: {previewActivity.perQuestionMetrics[item.id].false_positive_count}</div>
+                                        <div>false_negative_count: {previewActivity.perQuestionMetrics[item.id].false_negative_count}</div>
+                                        <div>confidence_level: {previewActivity.perQuestionMetrics[item.id].confidence_level}</div>
+                                        {Array.isArray(previewActivity.perQuestionMetrics[item.id].edge_case_failures) && (
+                                          <div>edge_case_failures: {previewActivity.perQuestionMetrics[item.id].edge_case_failures.length}</div>
+                                        )}
+                                        {Array.isArray(previewActivity.perQuestionMetrics[item.id].improvement_suggestions) && previewActivity.perQuestionMetrics[item.id].improvement_suggestions.length > 0 && (
+                                          <div>improvement_suggestions: {previewActivity.perQuestionMetrics[item.id].improvement_suggestions.join('; ')}</div>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </div>
