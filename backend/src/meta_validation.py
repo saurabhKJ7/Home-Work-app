@@ -3,7 +3,9 @@ Meta-validation framework to assess the accuracy of generated validation functio
 """
 import json
 from typing import Dict, List, Any, Tuple
+from utils.logger import get_logger
 from .sandbox import sandbox  # Import mock sandbox instance
+logger = get_logger("meta_validation")
 
 def execute_validation_function(validation_function: str, test_input: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -27,6 +29,7 @@ def execute_validation_function(validation_function: str, test_input: Dict[str, 
         result = json.loads(output.strip())
         return result
     except Exception as e:
+        logger.exception("execute_validation_function failed")
         return {
             "error": str(e),
             "is_correct": False,
@@ -65,6 +68,7 @@ def validate_function(
         
         # Check for execution failures
         if result.get("execution_failed", False):
+            logger.warning("validate_function: execution failed for test %d error=%s", i, result.get("error"))
             execution_failures += 1
             results.append({
                 "test_case_index": i,
@@ -82,6 +86,7 @@ def validate_function(
             false_positives += 1
         elif not actual and expected:
             false_negatives += 1
+        logger.info("validate_function: test=%d expected=%s actual=%s", i, expected, actual)
             
         results.append({
             "test_case_index": i,

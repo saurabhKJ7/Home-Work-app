@@ -3,9 +3,11 @@ import pandas as pd
 from langchain.embeddings import OpenAIEmbeddings
 from pinecone import Pinecone, ServerlessSpec
 from dotenv import load_dotenv
+from utils.logger import get_logger
 
 load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+logger = get_logger("pinecone_setup")
 
 # Define the path to the Excel file
 EXCEL_PATH = os.path.join(os.path.dirname(__file__), "../text-to-function(evaluation).xlsx")
@@ -35,7 +37,7 @@ if not pc.has_index(index_name):
     )
 
 index = pc.Index(index_name)
-print(index)
+logger.info("Pinecone index ready: %s", index_name)
 
 items = [
     (str(i), emb, {"text": txt})
@@ -49,6 +51,6 @@ for i in range(0, len(items), 100):
     metadatas = [item[2] for item in batch]
     index.upsert(vectors=[(id, vec, meta) for id, vec, meta in zip(ids, vectors, metadatas)])
 
-print(f"Indexed {len(items)} items to Pinecone.")
+logger.info("Indexed %d items to Pinecone", len(items))
 
 

@@ -3,8 +3,10 @@ from pinecone import Pinecone
 from typing import List, Dict, Any
 from langchain_openai import OpenAIEmbeddings
 from dotenv import load_dotenv
+from utils.logger import get_logger
 load_dotenv()
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+logger = get_logger("retrieval")
 
 
 def get_embeddings(text: str):
@@ -44,8 +46,8 @@ def retrieve_similar_examples(query_vector: List[float], top_k: int = 3) -> List
         index = get_index()
         results = index.query(vector=query_vector, top_k=top_k, include_metadata=True)
         return results.matches
-    except Exception as e:
-        print(f"Error retrieving from Pinecone: {str(e)}")
+    except Exception:
+        logger.exception("retrieve_similar_examples failed")
         return []
 
 

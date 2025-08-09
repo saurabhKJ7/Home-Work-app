@@ -6,6 +6,9 @@ import numpy as np
 from langchain_openai import OpenAIEmbeddings
 from rank_bm25 import BM25Okapi
 from src.retrieval import get_embeddings, retrieve_similar_examples
+from utils.logger import get_logger
+
+logger = get_logger("rag")
 
 def get_weighted_examples(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     """
