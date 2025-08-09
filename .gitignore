@@ -19,3 +19,12 @@ __pycache__/
 .env.test.local
 .benchmarks
 .benchmarks/
+_pycache_/
+__pycache__/
+_pycache/
+_pycache_/
+__pycache__/
+_pycache/
+_pycache_/
+__pycache__/
+_pycache/
