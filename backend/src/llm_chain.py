@@ -7,8 +7,10 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
 from dotenv import load_dotenv
+from utils.logger import get_logger
 from e2b import Sandbox
 load_dotenv()
+logger = get_logger("llm")
 
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
@@ -74,15 +76,123 @@ from .sandbox import sandbox  # Import mock sandbox instance
 def evaluate_code(code):
     import time 
     initial_time = time.time()
-    sandbox.files.write("script.js", code)
-    execution = sandbox.commands.run("node script.js")
-    final_time = time.time()
-    print(f"Execution time: {final_time - initial_time:.2f} seconds")
-    return execution.stdout or execution.stderr
+    try:
+        sandbox.files.write("script.js", code)
+        execution = sandbox.commands.run("node script.js")
+        return execution.stdout or execution.stderr
+    except Exception:
+        logger.exception("evaluate_code: sandbox execution failed")
+        raise
+    finally:
+        final_time = time.time()
+        logger.info("evaluate_code execution_time_sec=%.2f", (final_time - initial_time))
 
 
 
 from langchain.output_parsers import PydanticOutputParser
+
+def run_validation_tests_in_sandbox(generated_code: str, validation_tests: List[TestCase]):
+    """
+    Execute the generated JavaScript function against provided validation tests
+    inside the sandbox and return a structured summary.
+    """
+    # Try to detect function name and parameter names
+    func_name = None
+    param_names: List[str] = []
+    try:
+        # function foo(a,b) {...}
+        m = re.findall(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)", generated_code)
+        if m:
+            func_name, params_str = m[-1]
+            if params_str.strip():
+                param_names = [p.strip() for p in params_str.split(',') if p.strip()]
+        else:
+            # const foo = (a,b)=>{...}
+            m2 = re.findall(r"const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(([^)]*)\)\s*=>", generated_code)
+            if m2:
+                func_name, params_str = m2[-1]
+                if params_str.strip():
+                    param_names = [p.strip() for p in params_str.split(',') if p.strip()]
+    except Exception:
+        pass
+
+    tests_json = json.dumps([t.dict() for t in validation_tests])
+    param_names_json = json.dumps(param_names)
+    export_line = f"globalThis.__solver__ = {func_name};" if func_name else ""
+    harness = f"""
+{generated_code}
+{export_line}
+const __PARAM_NAMES__ = {param_names_json};
+const tests = {tests_json};
+function tryRun(fn, input, paramNames) {{
+  try {{
+    let args;
+    if (Array.isArray(paramNames) && paramNames.length > 1) {{
+      args = paramNames.map(n => input?.[n]);
+    }} else if (Array.isArray(paramNames) && paramNames.length === 1) {{
+      args = [input];
+    }} else {{
+      if (input && typeof input === 'object' && 'a' in input && 'b' in input) {{
+        args = [input.a, input.b];
+      }} else {{
+        args = [input];
+      }}
+    }}
+    return {{ ok: true, value: fn(...args) }};
+  }} catch (e) {{ return {{ ok: false, error: String(e) }}; }}
+}}
+function main() {{
+  let solver = globalThis.__solver__;
+  if (!solver) {{
+    try {{
+      const names = Object.keys(globalThis).filter(k => typeof globalThis[k] === 'function');
+      solver = globalThis.calculateAnswer || globalThis.solve || globalThis.answer || (names.length ? globalThis[names[names.length-1]] : null);
+    }} catch {{ solver = null; }}
+  }}
+  if (!solver) return {{ total: 0, passed: 0, results: [], error: 'Solver function not found' }};
+  const results = tests.map((t, i) => {{
+    const r = tryRun(solver, t.input, __PARAM_NAMES__);
+    if (!r.ok) return {{ index: i, passed: false, error: r.error, expected: t.expectedOutput, input: t.input }};
+    const actual = r.value;
+    const passed = Number.isFinite(actual) && Number.isFinite(t.expectedOutput)
+      ? Math.abs(actual - t.expectedOutput) < 1e-9
+      : JSON.stringify(actual) === JSON.stringify(t.expectedOutput);
+    return {{ index: i, passed, actual, expected: t.expectedOutput, input: t.input }};
+  }});
+  const summary = {{ total: results.length, passed: results.filter(r => r.passed).length, results }};
+  return summary;
+}}
+const out = main();
+console.log(JSON.stringify(out));
+"""
+
+    logger.info(
+        "run_validation_tests_in_sandbox: tests=%d func=%s params=%s",
+        len(validation_tests), func_name, param_names,
+    )
+
+    try:
+        sandbox.files.write("script.js", harness)
+        exec_result = sandbox.commands.run("node script.js")
+        raw = exec_result.stdout or exec_result.stderr or "{}"
+        logger.debug("run_validation_tests_in_sandbox raw=%s", raw)
+        data = json.loads(raw)
+    except Exception:
+        logger.exception("run_validation_tests_in_sandbox: execution failed")
+        raise
+
+    try:
+        total = int(data.get("total", 0))
+        passed = int(data.get("passed", 0))
+        failed = max(0, total - passed)
+        logger.info(
+            "run_validation_tests_in_sandbox summary: total=%d passed=%d failed=%d",
+            total, passed, failed,
+        )
+    except Exception:
+        pass
+
+    return data
 
 def get_evaluate_function(rag_data, user_prompt):
     """
@@ -207,10 +317,10 @@ if __name__ == "__main__":
     ]
     user_prompt = "What is the product of 14 and 23?"
     result = get_evaluate_function(rag_data, user_prompt)
-    print(f"\nQuestion: {result.question}")
-    print(f"Answer Code: {result.code}")
+    logger.info("question=%s", result.question)
+    logger.debug("generated_code=%s", result.code)
     
     # Execute the code to get the answer
-    print("\nExecuting code...")
+    logger.info("executing generated code in sandbox")
     output = evaluate_code(result.code)
-    print(f"Result: {output}")
+    logger.info("execution result: %s", output)

@@ -1,7 +1,7 @@
 """
 Adaptive feedback generator for different response types
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -11,7 +11,8 @@ def generate_feedback(
     prompt: str,
     submission: Any,
     attempt_number: int = 1,
-    activity_type: str = None
+    activity_type: str = None,
+    hints: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Generate contextually appropriate feedback based on correctness and attempt number
@@ -62,6 +63,17 @@ def generate_feedback(
             feedback["tableEndText"] = "Let's keep trying. Consider a different approach."
         else:
             feedback["tableEndText"] = "Keep at it! Remember the key requirements of the problem."
+
+        # If model-provided hints are available, append a varying hint
+        if hints:
+            try:
+                idx = (attempt_number - 1) % max(1, len(hints))
+                hint = str(hints[idx]).strip()
+                if hint:
+                    feedback["tableEndText"] = f"{feedback['tableEndText']} Hint: {hint}"
+            except Exception:
+                # If anything goes wrong with hints selection, fall back silently
+                pass
     
     # Add activity-specific feedback
     if activity_type:

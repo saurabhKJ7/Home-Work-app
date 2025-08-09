@@ -5,6 +5,9 @@ from typing import Dict, Any, List, Optional
 from src.validation_generator import generate_validation_function
 from src.test_generator import generate_test_cases
 from src.meta_validation import validate_function
+from utils.logger import get_logger
+
+logger = get_logger("validation_pipeline")
 from models.schema import ValidationResponse
 
 def run_validation_pipeline(
@@ -29,6 +32,7 @@ def run_validation_pipeline(
     """
     # Step 1: Generate validation and feedback functions
     functions = generate_validation_function(prompt, activity_type, model_name)
+    logger.info("run_validation_pipeline: generated functions for activity_type=%s", activity_type)
     validation_function = functions["validation_function"]
     feedback_function = functions["feedback_function"]
     
@@ -40,6 +44,10 @@ def run_validation_pipeline(
     # Step 3: Validate the function
     validation_results = validate_function(
         prompt, validation_function, test_cases, expected_outcomes
+    )
+    logger.info(
+        "run_validation_pipeline: initial accuracy=%.3f",
+        validation_results.get("accuracy_score", 0.0),
     )
     
     # Step 4: Check if confidence is above threshold
@@ -56,6 +64,10 @@ def run_validation_pipeline(
         # Re-validate
         validation_results = validate_function(
             prompt, validation_function, test_cases, expected_outcomes
+        )
+        logger.info(
+            "run_validation_pipeline: revalidated accuracy=%.3f",
+            validation_results.get("accuracy_score", 0.0),
         )
     
     return {
@@ -117,7 +129,9 @@ def validate_student_submission(
         "Problem statement",  # This should be replaced with actual prompt
         submission,
         attempt_number,
-        activity_type
+        activity_type,
+        # Pass model-provided feedback hints when available
+        hints=None,
     )
     
     return ValidationResponse(

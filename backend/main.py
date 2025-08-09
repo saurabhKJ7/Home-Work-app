@@ -5,6 +5,7 @@ from fastapi import HTTPException, Depends
 from typing import List
 import os
 from dotenv import load_dotenv
+from utils.logger import get_logger
 
 from models.schema import (
     GenerateCodeRequest,
@@ -30,15 +31,15 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from pydantic import BaseModel as PBase
-from src.llm_chain import get_evaluate_function
+from src.llm_chain import get_evaluate_function, run_validation_tests_in_sandbox
 from src.retrieval import retrieve_similar_examples, get_embeddings
 from src.validation_pipeline import run_validation_pipeline, validate_student_submission
+from models.db_models import Activity as DBActivity
 from src.improved_rag import get_enhanced_rag_data
-from rank_bm25 import BM25Okapi
-from src.prompt_filter import PromptFilterEngine
 
 load_dotenv()
 
+logger = get_logger("api")
 app = FastAPI()
 
 @app.on_event("startup")
@@ -47,7 +48,7 @@ def on_startup():
         Base.metadata.create_all(bind=engine)
     except Exception as e:
         # Defer hard failure; surface via logs so API can still start
-        print(f"[startup] DB init error: {e}")
+        logger.exception("DB init error")
 
 # Custom CORS middleware to ensure headers are always sent
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -80,6 +81,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add request/response logging middleware (basic)
+@app.middleware("http")
+async def log_requests(request, call_next):
+    logger.info("%s %s", request.method, request.url.path)
+    try:
+        response = await call_next(request)
+        logger.info("%s %s -> %d", request.method, request.url.path, response.status_code)
+        return response
+    except Exception:
+        logger.exception("Unhandled error for %s %s", request.method, request.url.path)
+        raise
 
 
 @app.get("/health")
@@ -200,11 +213,6 @@ async def generate_code(
         # Get the query from user_query field
         if not payload.user_query:
             raise HTTPException(status_code=400, detail="Missing required field: user_query")
-        # Prompt filtering: block vague/malicious prompts before hitting LLMs
-        filter_engine = PromptFilterEngine()
-        ok, reason = filter_engine.check(payload.user_query)
-        if not ok:
-            raise HTTPException(status_code=400, detail=f"Prompt rejected: {reason}")
             
         # Use enhanced RAG system
         rag_data = get_enhanced_rag_data(
@@ -221,6 +229,21 @@ async def generate_code(
             
             # Generate code using improved function
             result = get_evaluate_function(rag_data, varied_query)
+
+            # Optionally run validation tests in sandbox and print debug summary
+            try:
+                tests = getattr(result, 'validationTests', []) or []
+                if tests:
+                    logger.info("/generate-code: running %d tests for question %d", len(tests), i + 1)
+                    test_summary = run_validation_tests_in_sandbox(result.code, tests)
+                    total = int(test_summary.get('total', 0))
+                    passed = int(test_summary.get('passed', 0))
+                    failed = max(0, total - passed)
+                    logger.info("/generate-code: tests total=%d passed=%d failed=%d", total, passed, failed)
+                else:
+                    logger.warning("/generate-code: model returned no validation tests")
+            except Exception as test_err:
+                logger.exception("/generate-code: test execution failed")
             
             # Create unique question ID
             question_id = f"q_{i+1}_{int(datetime.now().timestamp())}"
@@ -232,9 +255,7 @@ async def generate_code(
                 "question_id": question_id,
                 "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
                 "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
-                "output_format": getattr(result, 'outputFormat', None),
-                "feedback_hints": getattr(result, 'feedbackHints', None)
+                "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
             })
         
         # Return multiple questions
@@ -243,7 +264,8 @@ async def generate_code(
             "total_questions": num_questions
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("/generate-code failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/validate-function", response_model=ValidationResponse)
@@ -257,7 +279,7 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
         # Ensure we have a validation function
         if not activity.validation_function:
             try:
-                print(f"[validate-function] Generating validation function for activity {activity.id}")
+                logger.info("/validate-function: generating validation function for activity %s", activity.id)
                 pipeline = run_validation_pipeline(
                     activity.problem_statement,
                     activity.type,
@@ -269,10 +291,10 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
                     
                 db.add(activity)
                 db.commit()
-                print(f"[validate-function] Generated and saved validation function for activity {activity.id}")
+                logger.info("/validate-function: generated and saved validation function for activity %s", activity.id)
             except Exception as gen_err:
                 db.rollback()
-                print(f"[validate-function] Generation failed for activity {activity.id}: {gen_err}")
+                logger.exception("/validate-function: generation failed for activity %s", activity.id)
                 return ValidationResponse(
                     is_correct=False,
                     feedback="Unable to validate answer at this time. Please try again later.",
@@ -289,11 +311,26 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
                 payload.attempt_number
             )
             
-            # Result is already a ValidationResponse
+            # Incorporate model-provided hints if available on the activity
+            if hasattr(activity, "feedback_hints") and activity.feedback_hints and not result.is_correct:
+                try:
+                    from src.feedback_generator import generate_feedback
+                    hints = list(activity.feedback_hints or [])
+                    enriched = generate_feedback(
+                        is_correct=False,
+                        prompt=activity.problem_statement,
+                        submission=payload.student_response,
+                        attempt_number=payload.attempt_number,
+                        activity_type=activity.type,
+                        hints=hints,
+                    )
+                    result.feedback = enriched.get("tableEndText", result.feedback)
+                except Exception:
+                    logger.exception("/validate-function: failed to augment feedback with hints")
             return result
             
-        except Exception as val_err:
-            print(f"[validate-function] Validation failed for activity {activity.id}: {val_err}")
+        except Exception:
+            logger.exception("/validate-function: execution failed for activity %s", activity.id)
             return ValidationResponse(
                 is_correct=False,
                 feedback="Error validating your answer. Please check your submission format.",
@@ -301,9 +338,9 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
                 metadata={"error": "validation_execution_failed"}
             )
             
-    except Exception as e:
-        print(f"[validate-function] Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("/validate-function: unexpected error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/meta-validate", response_model=dict)
@@ -324,8 +361,9 @@ async def meta_validate_function(payload: MetaValidationRequest):
             "confidence_level": result["validation_results"]["confidence_level"],
             "improvement_suggestions": result["validation_results"]["improvement_suggestions"]
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("/meta-validate failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/feedback-answer", response_model=FeedbackResponse)
@@ -346,8 +384,9 @@ async def feedback_answer(payload: FeedbackRequest):
             feedback=str(result.get("feedback", "")),
             confidence_score=float(result.get("confidence_score", 0.0)),
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("/feedback-answer failed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # Activities CRUD (minimal)
@@ -375,9 +414,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                             "question_id": question.question_id,
                             "validation_function": question.code,
                             "input_example": question.input_example if hasattr(question, 'input_example') else None,
-                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
-                            "output_format": getattr(question, 'output_format', None),
-                            "feedback_hints": getattr(question, 'feedback_hints', None)
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
                         }
                     for idx, question in enumerate(payload.questions)
                 ],
@@ -397,9 +434,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                             "question_id": question.question_id,
                             "validation_function": question.code,
                             "input_example": question.input_example if hasattr(question, 'input_example') else None,
-                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
-                            "output_format": getattr(question, 'output_format', None),
-                            "feedback_hints": getattr(question, 'feedback_hints', None)
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
                         }
                     for idx, question in enumerate(payload.questions)
                 ],
@@ -437,9 +472,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
             # Store test cases directly in the activity
             input_example=payload.questions[0].input_example if payload.questions else None,
             expected_output=payload.questions[0].expected_output if payload.questions else None,
-            validation_tests=payload.questions[0].validation_tests if payload.questions else None,
-            output_format=getattr(payload.questions[0], 'output_format', None),
-            feedback_hints=getattr(payload.questions[0], 'feedback_hints', None)
+            validation_tests=payload.questions[0].validation_tests if payload.questions else None
         )
         db.add(activity)
         db.flush()
@@ -481,11 +514,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                         {
                             "id": "1",
                             "question": question.question,
-                            "answer": 0,  # Will be calculated from validation function
-                            "input_example": question.input_example if hasattr(question, 'input_example') else None,
-                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
-                            "output_format": getattr(question, 'output_format', None),
-                            "feedback_hints": getattr(question, 'feedback_hints', None)
+                            "answer": 0  # Will be calculated from validation function
                         }
                     ]
                 }
@@ -496,11 +525,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                             "id": "1", 
                             "question": question.question,
                             "type": "text",
-                            "answer": "",
-                            "input_example": question.input_example if hasattr(question, 'input_example') else None,
-                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
-                            "output_format": getattr(question, 'output_format', None),
-                            "feedback_hints": getattr(question, 'feedback_hints', None)
+                            "answer": ""
                         }
                     ]
                 }
@@ -530,8 +555,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
             input_example=payload.questions[0].input_example if payload.questions else None,
             expected_output=payload.questions[0].expected_output if payload.questions else None,
             validation_tests=payload.questions[0].validation_tests if payload.questions else None,
-            output_format=getattr(payload.questions[0], 'output_format', None),
-            feedback_hints=getattr(payload.questions[0], 'feedback_hints', None)
+            feedback_hints=payload.questions[0].feedback_hints if payload.questions and hasattr(payload.questions[0], 'feedback_hints') else None
         )
         db.add(activity)
         db.flush()
@@ -630,10 +654,7 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
     if user.role == "teacher" and a.user_id != user.id:
         raise HTTPException(status_code=403, detail="You don't have permission to access this activity")
     
-    print(f"[DEBUG] Fetching activity {activity_id}")
-    print(f"[DEBUG] Activity title: {a.title}")
-    print(f"[DEBUG] UI Config from DB: {a.ui_config}")
-    print(f"[DEBUG] UI Config type: {type(a.ui_config)}")
+    logger.debug("/activities/%s fetched: title=%s", activity_id, a.title)
         
     return ActivityRead(
         id=a.id,
@@ -650,40 +671,6 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
     )
 
 
-@app.post("/activities/{activity_id}/select-hint", response_model=HintResponse)
-def select_hint(activity_id: str, payload: HintRequest, db: Session = Depends(get_db), user: DBUser = Depends(get_current_user)):
-    a = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
-    if not a:
-        raise HTTPException(status_code=404, detail="Activity not found")
-    # Collect hints: prefer per-question in ui_config if available; fallback to activity.feedback_hints
-    hints: list[str] = []
-    try:
-        if a.ui_config:
-            if a.type == "Mathematical" and isinstance(a.ui_config.get("math"), list):
-                for q in a.ui_config["math"]:
-                    if q.get("feedback_hints"):
-                        hints.extend(q["feedback_hints"])    
-            elif a.type == "Logical" and isinstance(a.ui_config.get("logic"), list):
-                for q in a.ui_config["logic"]:
-                    if q.get("feedback_hints"):
-                        hints.extend(q["feedback_hints"])    
-    except Exception:
-        pass
-    if not hints and getattr(a, "feedback_hints", None):
-        hints = list(a.feedback_hints or [])
-    # If still empty, return a generic hint
-    if not hints:
-        return HintResponse(hint="Re-read the question carefully and check each step. Focus on order of operations and data shape.", matched_index=-1, score=0.0)
-    # Rank hints with BM25 against the student's response text
-    docs = [h.lower() for h in hints]
-    tokenized = [d.split() for d in docs]
-    bm25 = BM25Okapi(tokenized)
-    query_tokens = str(payload.student_response).lower().split()
-    scores = bm25.get_scores(query_tokens)
-    best_idx = int(max(range(len(scores)), key=lambda i: scores[i]))
-    return HintResponse(hint=hints[best_idx], matched_index=best_idx, score=float(scores[best_idx]))
-
-
 @app.delete("/activities/{activity_id}")
 def delete_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser = Depends(require_role("teacher"))):
     a = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
@@ -698,6 +685,71 @@ def delete_activity(activity_id: str, db: Session = Depends(get_db), user: DBUse
     db.commit()
     return {"ok": True}
 
+
+@app.post("/activities/{activity_id}/select-hint", response_model=HintResponse)
+def select_hint(
+    activity_id: str,
+    payload: HintRequest,
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(require_role("student")),
+):
+    try:
+        activity = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
+        if not activity:
+            raise HTTPException(status_code=404, detail="Activity not found")
+
+        # Prefer question-specific hints from UI config if available
+        hints = []
+        try:
+            ui_cfg = activity.ui_config or {}
+            qid = getattr(payload, "question_id", None)
+            if qid and isinstance(ui_cfg, dict):
+                for group_key in ("math", "logic"):
+                    items = ui_cfg.get(group_key) or []
+                    for item in items:
+                        if str(item.get("question_id")) == str(qid):
+                            hints = list(item.get("feedback_hints") or [])
+                            break
+                    if hints:
+                        break
+        except Exception:
+            hints = []
+
+        # Fallback to activity-level hints
+        if not hints:
+            try:
+                hints = list(activity.feedback_hints or [])
+            except Exception:
+                hints = []
+
+        if not hints:
+            return HintResponse(hint="No hints available for this activity.", matched_index=-1, score=0.0)
+
+        # Derive attempt count for this student and activity to rotate hints
+        try:
+            attempts_count = (
+                db.query(DBAttempt)
+                .filter(DBAttempt.user_id == user.id, DBAttempt.activity_id == activity_id)
+                .count()
+            )
+        except Exception:
+            attempts_count = 0
+        attempt_number = attempts_count + 1
+        idx = (attempt_number - 1) % len(hints)
+        selected = str(hints[idx]).strip() or "Keep trying. Break the problem into smaller steps."
+        logger.info(
+            "/activities/%s/select-hint: attempt=%d idx=%d/%d",
+            activity_id,
+            attempt_number,
+            idx,
+            len(hints),
+        )
+        return HintResponse(hint=selected, matched_index=idx, score=1.0)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("/activities/%s/select-hint failed", activity_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/activities/{activity_id}/attempts", response_model=AttemptRead)
 async def create_attempt(
