@@ -232,6 +232,59 @@ const ActivityDetail = () => {
     return { correct: 0, total: 0, percentage: 0 };
   };
 
+  // Helper: deep equality for comparing outputs
+  const deepEqual = (a: any, b: any): boolean => {
+    if (typeof a === 'number' && typeof b === 'number') {
+      return Math.abs(a - b) < 1e-6;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (!deepEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      const aKeys = Object.keys(a);
+      const bKeys = Object.keys(b);
+      if (aKeys.length !== bKeys.length) return false;
+      for (const k of aKeys) {
+        if (!deepEqual(a[k], b[k])) return false;
+      }
+      return true;
+    }
+    return String(a) === String(b);
+  };
+
+  // Helper: extract function name and params from code
+  const extractFunctionMeta = (code: string): { name: string; params: string[] } => {
+    let name = 'calculateAnswer';
+    let params: string[] = [];
+    const fnMatch = code.match(/function\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/);
+    if (fnMatch) {
+      name = fnMatch[1];
+      params = fnMatch[2].split(',').map(s => s.trim()).filter(Boolean);
+      return { name, params };
+    }
+    const arrowMatch = code.match(/const\s+([a-zA-Z0-9_]+)\s*=\s*\(([^)]*)\)\s*=>/);
+    if (arrowMatch) {
+      name = arrowMatch[1];
+      params = arrowMatch[2].split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return { name, params };
+  };
+
+  // Helper: build callable and invoke with either object or positional args
+  const evaluateCodeWithInput = (code: string, input: any): any => {
+    const { name, params } = extractFunctionMeta(code);
+    const fn: any = new Function(`${code}; return ${name};`)();
+    if (params.length > 1 && input && typeof input === 'object' && !Array.isArray(input)) {
+      const args = params.map(p => (input as any)[p]);
+      return fn(...args);
+    }
+    return fn(input);
+  };
+
   const handleSubmit = async (answers: any) => {
     console.log('[Submit] User answers:', answers);
     console.log('[Submit] Activity payload:', activity);
@@ -267,207 +320,82 @@ const ActivityDetail = () => {
 
       
       if (validationFunctions && typeof validationFunctions === 'object') {
-        // Multiple questions - validate each answer with its corresponding function
+        // Multiple questions - evaluate each with stored input example and compare to student answer
         const questionResults = {} as any;
         let totalCorrect = 0;
         let totalQuestions = 0;
-        let totalTests = 0;
-        let totalTestsPassed = 0;
-        let overallFeedback = [];
-        
+        let overallFeedback: string[] = [];
+
         for (const [questionId, validationCode] of Object.entries(validationFunctions)) {
           if (answers.hasOwnProperty(questionId)) {
             totalQuestions++;
-            
             try {
-              // Get input example and expected output from activity
               const questionIdx = Number(questionId) - 1;
               const questionNode = (activity.content?.math || activity.content?.logic)?.[questionIdx] || {};
-              const inputExample = questionNode.input_example;
-              const questionValidationTests = questionNode.validation_tests || [];
+              const inputExample = questionNode.input_example ?? activity.input_example;
               console.log(`[Submit] Q${questionId} input_example:`, inputExample);
-              console.log(`[Submit] Q${questionId} validation_tests:`, questionValidationTests);
 
-              // Create function to validate answer
-              const validateAnswer = new Function(`
-                ${validationCode}
-                 const funcName = ${validationCode};
-            return eval(funcName);
-              `);
-              const actualAnswer = validateAnswer()(inputExample);
-              const expectedAnswer = actualAnswer;
+              const expectedAnswer = evaluateCodeWithInput(String(validationCode), inputExample);
               console.log(`[Submit] Q${questionId} evaluated expectedAnswer from code:`, expectedAnswer);
-              
-              // Get user's answer for this specific question
-              const userAnswer = answers[questionId];
-              const userNum = typeof userAnswer === 'string' ? parseFloat(userAnswer) : userAnswer;
-              const expectedNum = typeof expectedAnswer === 'string' ? parseFloat(expectedAnswer) : expectedAnswer;
-              
-              const isCorrect = !isNaN(userNum) && !isNaN(actualAnswer) && Math.abs(userNum - actualAnswer) < 0.0001;
-              // Evaluate LLM-provided validation tests for this question using the generated function
-              let passedCountForQuestion = 0;
-              let testsCountForQuestion = 0;
-              const testDetails: Array<{ input: any; expected: any; actual: any; passed: boolean }> = [];
-              if (Array.isArray(questionValidationTests) && questionValidationTests.length > 0) {
-                const runFunc = validateAnswer();
-                for (const t of questionValidationTests) {
-                  try {
-                    const out = runFunc(t.input);
-                    const pass = Math.abs(out - t.expectedOutput) < 0.0001;
-                    totalTests++;
-                    testsCountForQuestion++;
-                    if (pass) { passedCountForQuestion++; totalTestsPassed++; }
-                    testDetails.push({ input: t.input, expected: t.expectedOutput, actual: out, passed: pass });
-                  } catch (err) {
-                    console.warn(`[Submit] Q${questionId} test execution error:`, err);
-                    totalTests++;
-                    testsCountForQuestion++;
-                    testDetails.push({ input: t.input, expected: t.expectedOutput, actual: undefined, passed: false });
-                  }
-                }
-                console.log(`[Submit] Q${questionId} tests passed: ${passedCountForQuestion}/${questionValidationTests.length}`);
-              } else {
-                console.log(`[Submit] Q${questionId} has no validation tests to run.`);
-              }
-              
+
+              // Normalize user answer
+              const userAnswer = (answers as any)[questionId];
+              const isCorrect = deepEqual(userAnswer, expectedAnswer);
+
               questionResults[questionId] = {
                 is_correct: isCorrect,
                 user_answer: userAnswer,
-                expected_answer: expectedAnswer,
-                tests_passed: passedCountForQuestion,
-                tests_total: testsCountForQuestion || (Array.isArray(questionValidationTests) ? questionValidationTests.length : 0),
-                test_details: testDetails
+                expected_answer: expectedAnswer
               };
-              
-              if (isCorrect) {
-                totalCorrect++;
-                overallFeedback.push(`Question ${questionId}: Correct!`);
-              } else {
-                overallFeedback.push(`Question ${questionId}: Incorrect.`);
-              }
-              
-              console.log(`[Submit] Q${questionId}: User=${userNum}, Expected=${expectedNum}, Correct=${isCorrect}`);
-              
-            } catch (error) {
+
+              overallFeedback.push(`Question ${questionId}: ${isCorrect ? 'Correct!' : 'Incorrect.'}`);
+              if (isCorrect) totalCorrect++;
+            } catch (error: any) {
               console.error(`Error validating question ${questionId}:`, error);
-              questionResults[questionId] = {
-                is_correct: false,
-                error: error.message
-              };
+              questionResults[questionId] = { is_correct: false, error: String(error?.message || error) };
               overallFeedback.push(`Question ${questionId}: Validation error.`);
             }
           }
         }
-        
-        // Overall result
-        const overallCorrect = totalCorrect === totalQuestions && totalQuestions > 0;
+
         const scorePercentage = totalQuestions > 0 ? (totalCorrect / totalQuestions) * 100 : 0;
-        
         validationResult = {
-          is_correct: overallCorrect,
-          feedback: `Score: ${totalCorrect}/${totalQuestions} (${scorePercentage.toFixed(1)}%) - ${overallFeedback.join(' ')}. Tests passed: ${totalTestsPassed}/${totalTests}`,
+          is_correct: totalCorrect === totalQuestions && totalQuestions > 0,
+          feedback: `Score: ${totalCorrect}/${totalQuestions} (${scorePercentage.toFixed(1)}%) - ${overallFeedback.join(' ')}`,
           confidence_score: scorePercentage / 100,
           metadata: {
             question_results: questionResults,
             total_correct: totalCorrect,
-            total_questions: totalQuestions,
-            total_tests: totalTests,
-            total_tests_passed: totalTestsPassed
+            total_questions: totalQuestions
           }
         };
-        
+
       } else {
         // Single question validation (legacy)
-              // Get validation functions and test cases from enhanced ui_config
-      let finalValidationFunction = activity.validation_function;
-      let validationTests = [];
-      let inputExamples = [];
-      let expectedOutputs = [];
-      
-      // Try to get validation data from ui_config
-      if (activity.content?.validation_data) {
-        validationTests = activity.content.validation_data.test_cases || [];
-        inputExamples = activity.content.validation_data.input_examples || [];
-        expectedOutputs = activity.content.validation_data.expected_outputs || [];
-      }
-        
-        // Create validation function that uses test cases
-        finalValidationFunction = `
-          function evaluate(params) {
-            try {
-              const { submission } = params;
-              
-              // Get validation tests
-              const validationTests = ${JSON.stringify(validationTests)};
-              
-              // Run all test cases
-              const testResults = validationTests.map(test => {
-                try {
-                  // Execute the actual validation function for each test
-                  ${activity.validation_function}
-                  const actualOutput = calculateAnswer(test.input);
-                  const expectedOutput = test.expectedOutput;
-                  
-                  // Compare with expected output
-                  const isCorrect = Math.abs(actualOutput - expectedOutput) < 0.0001;
-                  return { isCorrect, input: test.input, expected: expectedOutput, actual: actualOutput };
-                } catch (e) {
-                  return { isCorrect: false, error: e.message };
-                }
-              });
-              
-              // Check user's answer against their test case
-              let userAnswer;
-              if (typeof submission === 'object') {
-                const keys = Object.keys(submission);
-                if (keys.length > 0) {
-                  userAnswer = submission[keys[0]];
-                }
-              } else {
-                userAnswer = submission;
-              }
-              
-              // Convert to number for comparison
-              const userNum = typeof userAnswer === 'string' ? parseFloat(userAnswer) : userAnswer;
-              
-              // Find matching test case for user's answer
-              const matchingTest = testResults.find(test => 
-                Math.abs(test.actual - userNum) < 0.0001
-              );
-              
-              const isCorrect = Boolean(matchingTest?.isCorrect);
-              
-              // Calculate confidence based on test case results
-              const passedTests = testResults.filter(t => t.isCorrect).length;
-              const confidence = passedTests / testResults.length;
-              
-              return {
-                is_correct: isCorrect,
-                feedback: isCorrect ? 'Correct! Well done!' : 'Not quite right. Please try again.',
-                confidence_score: confidence,
-                metadata: {
-                  test_results: testResults,
-                  passed_tests: passedTests,
-                  total_tests: testResults.length
-                }
-              };
-            } catch (error) {
-              console.error('Validation error:', error);
-              return {
-                is_correct: false,
-                feedback: "Error in validation: " + error.message,
-                confidence_score: 0
-              };
-            }
+        try {
+          const code = String(activity.validation_function || '');
+          const inputExample = activity.input_example ?? activity.content?.math?.[0]?.input_example ?? activity.content?.logic?.[0]?.input_example;
+
+          const expectedAnswer = evaluateCodeWithInput(code, inputExample);
+
+          // Determine user's single answer
+          let userAnswer: any = answers;
+          if (answers && typeof answers === 'object' && !Array.isArray(answers)) {
+            const keys = Object.keys(answers);
+            if (keys.length > 0) userAnswer = (answers as any)[keys[0]];
           }
-          
-          return evaluate(arguments[0]);
-        `;
-        
-        validationResult = ValidationService.executeValidation(finalValidationFunction, {
-          submission: answers,
-          global_context_variables: { attempt_number: 1 }
-        });
+
+          const isCorrect = deepEqual(userAnswer, expectedAnswer);
+          validationResult = {
+            is_correct: isCorrect,
+            feedback: isCorrect ? 'Correct! Well done!' : 'Not quite right. Please try again.',
+            confidence_score: isCorrect ? 1 : 0,
+            metadata: { expected_answer: expectedAnswer, user_answer: userAnswer }
+          };
+        } catch (err: any) {
+          console.error('Validation error (single question):', err);
+          validationResult = { is_correct: false, feedback: 'Error validating submission.', confidence_score: 0 };
+        }
       }
       
       console.log('[Submit] Final validation result:', validationResult);
