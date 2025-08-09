@@ -32,6 +32,7 @@ from src.llm_chain import get_evaluate_function
 from src.retrieval import retrieve_similar_examples, get_embeddings
 from src.validation_pipeline import run_validation_pipeline, validate_student_submission
 from src.improved_rag import get_enhanced_rag_data
+from src.prompt_filter import PromptFilterEngine
 
 load_dotenv()
 
@@ -196,6 +197,11 @@ async def generate_code(
         # Get the query from user_query field
         if not payload.user_query:
             raise HTTPException(status_code=400, detail="Missing required field: user_query")
+        # Prompt filtering: block vague/malicious prompts before hitting LLMs
+        filter_engine = PromptFilterEngine()
+        ok, reason = filter_engine.check(payload.user_query)
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"Prompt rejected: {reason}")
             
         # Use enhanced RAG system
         rag_data = get_enhanced_rag_data(
