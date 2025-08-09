@@ -78,6 +78,9 @@ const TeacherDashboard = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [metaResult, setMetaResult] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Teacher-selected tests and responses for preview validation
+  const [teacherSelectedTests, setTeacherSelectedTests] = useState<Record<string, any[]>>({});
+  const [teacherResponses, setTeacherResponses] = useState<Record<string, string[]>>({});
   const { toast } = useToast();
   const { user, token } = useAuth();
   const navigate = useNavigate();
@@ -224,6 +227,28 @@ const TeacherDashboard = () => {
     }
   };
 
+  const pickRandomTests = (tests: any[] = [], count = 5): any[] => {
+    const arr = Array.isArray(tests) ? [...tests] : [];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr.slice(0, Math.min(count, arr.length));
+  };
+
+  const parseTeacherValue = (val: string): any => {
+    if (val == null) return val;
+    const trimmed = String(val).trim();
+    if (!trimmed.length) return trimmed;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      const num = Number(trimmed);
+      if (!Number.isNaN(num)) return num;
+      return trimmed;
+    }
+  };
+
   const handleGenerateActivity = async () => {
     if (!formData.title || !formData.type || !formData.difficulty) {
       toast({
@@ -313,25 +338,28 @@ const TeacherDashboard = () => {
         content: previewContent,
         questions: questions
       };
-      // Compute per-question test pass counts for preview
-      const perQuestionTests: Record<string, { passed: number; total: number }> = {};
-      const perQuestionTestDetails: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>> = {};
+      // Select up to 5 random tests per question and initialize teacher response fields
+      const selected: Record<string, any[]> = {};
+      const responses: Record<string, string[]> = {};
       if (formData.type === 'Mathematical' && previewContent.math) {
         for (const item of previewContent.math) {
-          const res = runTestsForQuestion(item.code, item.validation_tests, item.input_example);
-          perQuestionTests[item.id] = { passed: res.passed, total: res.total };
-          perQuestionTestDetails[item.id] = res.details;
+          const sample = pickRandomTests(item.validation_tests, 5);
+          selected[item.id] = sample;
+          responses[item.id] = sample.map(() => '');
         }
       } else if (formData.type === 'Logical' && previewContent.logic) {
         for (const item of previewContent.logic) {
-          const res = runTestsForQuestion(item.code, item.validation_tests, item.input_example);
-          perQuestionTests[item.id] = { passed: res.passed, total: res.total };
-          perQuestionTestDetails[item.id] = res.details;
+          const sample = pickRandomTests(item.validation_tests, 5);
+          selected[item.id] = sample;
+          responses[item.id] = sample.map(() => '');
         }
       }
-      (newPreview as any).perQuestionTests = perQuestionTests;
-      (newPreview as any).perQuestionTestDetails = perQuestionTestDetails;
-      console.log('[Generate] New preview object:', newPreview);
+      setTeacherSelectedTests(selected);
+      setTeacherResponses(responses);
+      // Clear any previous per-question results; they will be set after clicking Run Test Cases
+      (newPreview as any).perQuestionTests = {};
+      (newPreview as any).perQuestionTestDetails = {};
+      console.log('[Generate] New preview object:', newPreview, { selected });
 
       // For single question, set problem statement to the question
       if (questions.length === 1) {
@@ -598,29 +626,137 @@ const TeacherDashboard = () => {
                         </div>
                       )}
 
-                      {previewActivity.type === 'Mathematical' && (
-                        <MathQuestion 
-                          problems={previewActivity.content.math}
-                          onSubmit={() => {}} 
-                          isReadOnly
-                          showResults
-                          showTests
-                          perQuestionTests={previewActivity.perQuestionTests}
-                          perQuestionTestDetails={previewActivity.perQuestionTestDetails}
-                        />
+                      {previewActivity.type === 'Mathematical' && Array.isArray(previewActivity.content.math) && (
+                        <div className="space-y-4">
+                          {previewActivity.content.math.map((item: any) => {
+                            const perQuestionTests = previewActivity.perQuestionTests || {};
+                            const perQuestionTestDetails = previewActivity.perQuestionTestDetails || {};
+                            const testsRecord: Record<string, { passed: number; total: number }> = {};
+                            const detailsRecord: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>> = {};
+                            if (perQuestionTests[item.id]) testsRecord[item.id] = perQuestionTests[item.id];
+                            if (perQuestionTestDetails[item.id]) detailsRecord[item.id] = perQuestionTestDetails[item.id];
+                            return (
+                              <div key={item.id} className="space-y-2">
+                                <MathQuestion
+                                  problems={[item]}
+                                  onSubmit={() => {}}
+                                  isReadOnly
+                                  showResults
+                                  showTests
+                                  perQuestionTests={testsRecord}
+                                  perQuestionTestDetails={detailsRecord}
+                                />
+                                <div className="border rounded-md p-3">
+                                  <div className="font-medium mb-2">Teacher Test Inputs (Question {item.id})</div>
+                                  {(teacherSelectedTests[item.id] || []).map((t, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 py-1">
+                                      <div className="text-xs text-muted-foreground">Input:</div>
+                                      <code className="text-xs bg-muted/40 px-1.5 py-0.5 rounded">{JSON.stringify(t.input)}</code>
+                                      <div className="text-xs ml-3">Your expected output:</div>
+                                      <Input
+                                        value={teacherResponses[item.id]?.[idx] ?? ''}
+                                        onChange={(e) => {
+                                          setTeacherResponses(prev => ({
+                                            ...prev,
+                                            [item.id]: (prev[item.id] || []).map((v, i) => i === idx ? e.target.value : v)
+                                          }));
+                                        }}
+                                        placeholder="Type value (number/JSON)"
+                                      />
+                                    </div>
+                                  ))}
+                                  <div className="pt-2">
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => {
+                                        const tests = (teacherSelectedTests[item.id] || []).map((t: any, i: number) => ({
+                                          input: t.input,
+                                          expectedOutput: parseTeacherValue((teacherResponses[item.id] || [])[i] ?? '')
+                                        }));
+                                        const res = runTestsForQuestion(item.code, tests, item.input_example);
+                                        setPreviewActivity((prev: any) => ({
+                                          ...prev,
+                                          perQuestionTests: { ...(prev?.perQuestionTests || {}), [item.id]: { passed: res.passed, total: res.total } },
+                                          perQuestionTestDetails: { ...(prev?.perQuestionTestDetails || {}), [item.id]: res.details }
+                                        }));
+                                      }}
+                                    >
+                                      Run Test Cases
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
 
-                      {previewActivity.type === 'Logical' && (
-                        <LogicQuestion 
-                          problems={previewActivity.content.logic}
-                          onSubmit={() => {}} 
-                          isReadOnly
-                          showResults
-                          showTests
-                          perQuestionTests={previewActivity.perQuestionTests}
-                          perQuestionTestDetails={previewActivity.perQuestionTestDetails}
-                        />
+                      {previewActivity.type === 'Logical' && Array.isArray(previewActivity.content.logic) && (
+                        <div className="space-y-4">
+                          {previewActivity.content.logic.map((item: any) => {
+                            const perQuestionTests = previewActivity.perQuestionTests || {};
+                            const perQuestionTestDetails = previewActivity.perQuestionTestDetails || {};
+                            const testsRecord: Record<string, { passed: number; total: number }> = {};
+                            const detailsRecord: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>> = {};
+                            if (perQuestionTests[item.id]) testsRecord[item.id] = perQuestionTests[item.id];
+                            if (perQuestionTestDetails[item.id]) detailsRecord[item.id] = perQuestionTestDetails[item.id];
+                            return (
+                              <div key={item.id} className="space-y-2">
+                                <LogicQuestion
+                                  problems={[item]}
+                                  onSubmit={() => {}}
+                                  isReadOnly
+                                  showResults
+                                  showTests
+                                  perQuestionTests={testsRecord}
+                                  perQuestionTestDetails={detailsRecord}
+                                />
+                                <div className="border rounded-md p-3">
+                                  <div className="font-medium mb-2">Teacher Test Inputs (Question {item.id})</div>
+                                  {(teacherSelectedTests[item.id] || []).map((t, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 py-1">
+                                      <div className="text-xs text-muted-foreground">Input:</div>
+                                      <code className="text-xs bg-muted/40 px-1.5 py-0.5 rounded">{JSON.stringify(t.input)}</code>
+                                      <div className="text-xs ml-3">Your expected output:</div>
+                                      <Input
+                                        value={teacherResponses[item.id]?.[idx] ?? ''}
+                                        onChange={(e) => {
+                                          setTeacherResponses(prev => ({
+                                            ...prev,
+                                            [item.id]: (prev[item.id] || []).map((v, i) => i === idx ? e.target.value : v)
+                                          }));
+                                        }}
+                                        placeholder="Type value (number/JSON)"
+                                      />
+                                    </div>
+                                  ))}
+                                  <div className="pt-2">
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => {
+                                        const tests = (teacherSelectedTests[item.id] || []).map((t: any, i: number) => ({
+                                          input: t.input,
+                                          expectedOutput: parseTeacherValue((teacherResponses[item.id] || [])[i] ?? '')
+                                        }));
+                                        const res = runTestsForQuestion(item.code, tests, item.input_example);
+                                        setPreviewActivity((prev: any) => ({
+                                          ...prev,
+                                          perQuestionTests: { ...(prev?.perQuestionTests || {}), [item.id]: { passed: res.passed, total: res.total } },
+                                          perQuestionTestDetails: { ...(prev?.perQuestionTestDetails || {}), [item.id]: res.details }
+                                        }));
+                                      }}
+                                    >
+                                      Run Test Cases
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
+
+                      {/* Per-question teacher inputs and run buttons are rendered inline above */}
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <Button onClick={handlePublishActivity} variant="success" className="w-full">
