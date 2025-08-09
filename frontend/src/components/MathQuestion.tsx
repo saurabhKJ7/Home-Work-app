@@ -22,9 +22,10 @@ interface MathQuestionProps {
   userAnswers?: { [key: string]: number };
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
+  hintsByQuestion?: Record<string, string>;
 }
 
-const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {} }: MathQuestionProps) => {
+const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: MathQuestionProps) => {
   const [answers, setAnswers] = useState<{ [key: string]: number }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string) => {
@@ -85,6 +86,11 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
               {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">
                   Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? Math.min(5, problem.validation_tests?.length || 5)}
+                </div>
+              )}
+              {showResults && hintsByQuestion[problem.id] && (
+                <div className="mt-2 text-sm border rounded-md p-2 bg-warning/5 text-foreground">
+                  <span className="font-medium">Hint:</span> {hintsByQuestion[problem.id]}
                 </div>
               )}
               {showResults && showTests && perQuestionTestDetails[problem.id] && (

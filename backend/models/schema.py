@@ -43,6 +43,7 @@ class QuestionResponse(BaseModel):
     input_example: Optional[Dict[str, Any]] = None
     expected_output: Optional[Any] = None
     validation_tests: Optional[List[Dict[str, Any]]] = None
+    feedback_hints: Optional[List[str]] = None
 
 
 class GenerateCodeResponse(BaseModel):
@@ -85,6 +86,18 @@ class ActivityBase(BaseModel):
     expected_output: Optional[Any] = None
     validation_tests: Optional[List[TestCase]] = None
     test_cases_count: Optional[int] = 10
+    output_format: Optional[str] = None
+    feedback_hints: Optional[List[str]] = None
+
+class HintRequest(BaseModel):
+    activity_id: str
+    question_id: Optional[str] = None
+    student_response: Any
+
+class HintResponse(BaseModel):
+    hint: str
+    matched_index: int
+    score: float
 
 
 class ActivityCreate(ActivityBase):

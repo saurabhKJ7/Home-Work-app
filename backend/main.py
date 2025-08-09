@@ -19,6 +19,8 @@ from models.schema import (
     ValidationRequest,
     ValidationResponse,
     MetaValidationRequest,
+    HintRequest,
+    HintResponse,
 )
 from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser
 from utils.db import get_db, Base, engine
@@ -32,6 +34,7 @@ from src.llm_chain import get_evaluate_function
 from src.retrieval import retrieve_similar_examples, get_embeddings
 from src.validation_pipeline import run_validation_pipeline, validate_student_submission
 from src.improved_rag import get_enhanced_rag_data
+from rank_bm25 import BM25Okapi
 from src.prompt_filter import PromptFilterEngine
 
 load_dotenv()
@@ -229,7 +232,9 @@ async def generate_code(
                 "question_id": question_id,
                 "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
                 "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
+                "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
+                "output_format": getattr(result, 'outputFormat', None),
+                "feedback_hints": getattr(result, 'feedbackHints', None)
             })
         
         # Return multiple questions
@@ -370,7 +375,9 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                             "question_id": question.question_id,
                             "validation_function": question.code,
                             "input_example": question.input_example if hasattr(question, 'input_example') else None,
-                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
+                            "output_format": getattr(question, 'output_format', None),
+                            "feedback_hints": getattr(question, 'feedback_hints', None)
                         }
                     for idx, question in enumerate(payload.questions)
                 ],
@@ -390,7 +397,9 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                             "question_id": question.question_id,
                             "validation_function": question.code,
                             "input_example": question.input_example if hasattr(question, 'input_example') else None,
-                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
+                            "output_format": getattr(question, 'output_format', None),
+                            "feedback_hints": getattr(question, 'feedback_hints', None)
                         }
                     for idx, question in enumerate(payload.questions)
                 ],
@@ -428,7 +437,9 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
             # Store test cases directly in the activity
             input_example=payload.questions[0].input_example if payload.questions else None,
             expected_output=payload.questions[0].expected_output if payload.questions else None,
-            validation_tests=payload.questions[0].validation_tests if payload.questions else None
+            validation_tests=payload.questions[0].validation_tests if payload.questions else None,
+            output_format=getattr(payload.questions[0], 'output_format', None),
+            feedback_hints=getattr(payload.questions[0], 'feedback_hints', None)
         )
         db.add(activity)
         db.flush()
@@ -470,7 +481,11 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                         {
                             "id": "1",
                             "question": question.question,
-                            "answer": 0  # Will be calculated from validation function
+                            "answer": 0,  # Will be calculated from validation function
+                            "input_example": question.input_example if hasattr(question, 'input_example') else None,
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
+                            "output_format": getattr(question, 'output_format', None),
+                            "feedback_hints": getattr(question, 'feedback_hints', None)
                         }
                     ]
                 }
@@ -481,7 +496,11 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                             "id": "1", 
                             "question": question.question,
                             "type": "text",
-                            "answer": ""
+                            "answer": "",
+                            "input_example": question.input_example if hasattr(question, 'input_example') else None,
+                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else [],
+                            "output_format": getattr(question, 'output_format', None),
+                            "feedback_hints": getattr(question, 'feedback_hints', None)
                         }
                     ]
                 }
@@ -510,7 +529,9 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
             # Store test cases directly in the activity
             input_example=payload.questions[0].input_example if payload.questions else None,
             expected_output=payload.questions[0].expected_output if payload.questions else None,
-            validation_tests=payload.questions[0].validation_tests if payload.questions else None
+            validation_tests=payload.questions[0].validation_tests if payload.questions else None,
+            output_format=getattr(payload.questions[0], 'output_format', None),
+            feedback_hints=getattr(payload.questions[0], 'feedback_hints', None)
         )
         db.add(activity)
         db.flush()
@@ -627,6 +648,40 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
         correct_answers=a.correct_answers,
         created_at=a.created_at,
     )
+
+
+@app.post("/activities/{activity_id}/select-hint", response_model=HintResponse)
+def select_hint(activity_id: str, payload: HintRequest, db: Session = Depends(get_db), user: DBUser = Depends(get_current_user)):
+    a = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    # Collect hints: prefer per-question in ui_config if available; fallback to activity.feedback_hints
+    hints: list[str] = []
+    try:
+        if a.ui_config:
+            if a.type == "Mathematical" and isinstance(a.ui_config.get("math"), list):
+                for q in a.ui_config["math"]:
+                    if q.get("feedback_hints"):
+                        hints.extend(q["feedback_hints"])    
+            elif a.type == "Logical" and isinstance(a.ui_config.get("logic"), list):
+                for q in a.ui_config["logic"]:
+                    if q.get("feedback_hints"):
+                        hints.extend(q["feedback_hints"])    
+    except Exception:
+        pass
+    if not hints and getattr(a, "feedback_hints", None):
+        hints = list(a.feedback_hints or [])
+    # If still empty, return a generic hint
+    if not hints:
+        return HintResponse(hint="Re-read the question carefully and check each step. Focus on order of operations and data shape.", matched_index=-1, score=0.0)
+    # Rank hints with BM25 against the student's response text
+    docs = [h.lower() for h in hints]
+    tokenized = [d.split() for d in docs]
+    bm25 = BM25Okapi(tokenized)
+    query_tokens = str(payload.student_response).lower().split()
+    scores = bm25.get_scores(query_tokens)
+    best_idx = int(max(range(len(scores)), key=lambda i: scores[i]))
+    return HintResponse(hint=hints[best_idx], matched_index=best_idx, score=float(scores[best_idx]))
 
 
 @app.delete("/activities/{activity_id}")

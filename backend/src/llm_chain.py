@@ -23,6 +23,7 @@ class StructuredOutput(BaseModel):
     inputExample: Dict[str, Any] = Field(description="Example input parameters as JSON object")
     expectedOutput: Any = Field(description="Expected output for the input example")
     validationTests: List[TestCase] = Field(description="Array of 10 test cases to verify correctness")
+    feedbackHints: List[str] = Field(description="Exactly 10 short, hint-only feedback messages that do NOT reveal the answer")
 
 
 LANGSMITH_TRACING="true"
@@ -117,6 +118,10 @@ Given a user prompt, your job is to generate:
           {{ "input": ..., "expectedOutput": ... }},
           ...
         ]
+ 4. A field `feedbackHints` containing exactly 10 short hints that help a student who answers incorrectly.
+    - The hints must NOT reveal the final answer.
+    - Focus on common mistakes, reminders, and step cues.
+    - 1–2 sentences each, specific to this problem.
 USER QUERY: "{user_prompt}"
 IMPORTANT RULES:
 - :white_check_mark: The question must be a **concrete math problem**, not a general request for a function.
@@ -124,6 +129,7 @@ IMPORTANT RULES:
 - :white_check_mark: The "code" field must contain **only** the complete function definition — no example calls, no console.log statements, and no usage comments.
 - :white_check_mark: Include a matching inputExample and expectedOutput as part of the structured JSON.
 - :white_check_mark: The validationTests array must contain **10 diverse and valid test cases** to verify correctness.
+- :white_check_mark: Provide exactly 10 hint-only feedbacks in `feedbackHints`; do not include the solution.
 - :x: Do NOT return abstract tasks like "Write a function to calculate area."
 - :x: Do NOT return a generic utility function.
 - :x: Do NOT include any extra explanation, markdown, or natural language outside the JSON object.

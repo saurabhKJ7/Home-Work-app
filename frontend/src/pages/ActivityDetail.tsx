@@ -10,7 +10,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { getActivityById, submitAttempt, postJson, validateSubmission } from "@/lib/api";
+import { getActivityById, submitAttempt, postJson, validateSubmission, selectHint } from "@/lib/api";
 import { ValidationService } from "@/lib/validation";
 
 // Mock activity data with content
@@ -450,7 +450,8 @@ const ActivityDetail = () => {
       testsPassed: validationResult?.metadata?.total_tests_passed,
       totalTests: validationResult?.metadata?.total_tests,
       perQuestionTests,
-      perQuestionTestDetails
+      perQuestionTestDetails,
+      hintsByQuestion: {}
     };
     console.log('[Submit] Summary:', result);
 
@@ -464,6 +465,36 @@ const ActivityDetail = () => {
         feedback: validationResult.feedback,
         confidence_score: validationResult.confidence_score || 0
       }, token);
+      
+      // If not fully correct, fetch a hint per incorrect question
+      try {
+        if (!validationResult.is_correct) {
+          const hintsByQuestion: Record<string, string> = {};
+          if (typeof activity.validation_function === 'string') {
+            // Multiple-questions case: validation_function may be JSON map
+            try {
+              const vfMap = JSON.parse(activity.validation_function);
+              for (const qid of Object.keys(answers || {})) {
+                // Only fetch hint if wrong
+                const qRes = (validationResult.metadata?.question_results || {})[qid];
+                if (!qRes || qRes.is_correct) continue;
+                const res = await selectHint(id, (answers as any)[qid], token, qid);
+                hintsByQuestion[qid] = res.hint;
+              }
+            } catch {
+              // Single question fallback
+              if (!validationResult.is_correct) {
+                const firstKey = Object.keys(answers || {})[0];
+                const res = await selectHint(id, firstKey ? (answers as any)[firstKey] : answers, token);
+                hintsByQuestion['1'] = res.hint;
+              }
+            }
+          }
+          result.hintsByQuestion = hintsByQuestion;
+        }
+      } catch (e) {
+        console.warn('Hint selection failed:', e);
+      }
       
       setSubmissionResult(result);
       setIsSubmitted(true);
@@ -670,6 +701,7 @@ const ActivityDetail = () => {
                 userAnswers={submissionResult?.userAnswers}
                 perQuestionTests={submissionResult?.perQuestionTests}
                 perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
+                hintsByQuestion={submissionResult?.hintsByQuestion}
               />
             )}
 
@@ -683,6 +715,7 @@ const ActivityDetail = () => {
                 userAnswers={submissionResult?.userAnswers}
                 perQuestionTests={submissionResult?.perQuestionTests}
                 perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
+                hintsByQuestion={submissionResult?.hintsByQuestion}
               />
             )}
           </CardContent>
