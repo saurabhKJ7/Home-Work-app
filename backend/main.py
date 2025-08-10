@@ -1,5 +1,7 @@
 import uvicorn
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import HTTPException, Depends
 from typing import List
@@ -40,15 +42,27 @@ from src.improved_rag import get_enhanced_rag_data
 load_dotenv()
 
 logger = get_logger("api")
-app = FastAPI()
 
-@app.on_event("startup")
-def on_startup():
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: ensure tables exist using a background thread so we don't block the event loop
     try:
-        Base.metadata.create_all(bind=engine)
-    except Exception as e:
+        await asyncio.to_thread(Base.metadata.create_all, bind=engine)
+    except Exception:
         # Defer hard failure; surface via logs so API can still start
         logger.exception("DB init error")
+
+    yield
+
+    # Shutdown: dispose the engine cleanly
+    try:
+        await asyncio.to_thread(engine.dispose)
+    except Exception:
+        logger.exception("DB dispose error")
+
+
+app = FastAPI(lifespan=lifespan)
 
 # Custom CORS middleware to ensure headers are always sent
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -63,7 +77,7 @@ class CustomCORSMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             
         # Add CORS headers to every response
-        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
+        response.headers["Access-Control-Allow-Origin"] = os.getenv("FRONTEND_URL")
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
