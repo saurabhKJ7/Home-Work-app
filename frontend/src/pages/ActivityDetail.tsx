@@ -296,7 +296,112 @@ const ActivityDetail = () => {
     console.log('Activity:', activity);
     console.log('Submitting answers:', answers);
     
-    // Execute validation function(s) from activity - handle multiple questions
+    // Grid-based: validate by executing validation function(s) with the submitted grid
+    if (activity.type === 'Grid-based') {
+      let validationResult: any = {
+        is_correct: false,
+        feedback: '',
+        confidence_score: 0,
+        metadata: {}
+      };
+      try {
+        // Collect validation function code blocks
+        let codes: string[] = [];
+        try {
+          const vfMap = JSON.parse(activity.validation_function || '');
+          if (vfMap && typeof vfMap === 'object') {
+            codes = Object.values(vfMap as Record<string, string>).map(String);
+          }
+        } catch {
+          if (typeof activity.validation_function === 'string' && activity.validation_function.trim()) {
+            codes = [activity.validation_function];
+          }
+        }
+
+        // Fallback: if no codes found, mark as error
+        if (!codes.length) {
+          throw new Error('No validation function available for this grid activity');
+        }
+
+        // Evaluate all available validators; consider correct if any returns true
+        let anyError = false;
+        const errors: string[] = [];
+        let isCorrect = false;
+        for (const code of codes) {
+          try {
+            const result = evaluateCodeWithInput(String(code), answers);
+            // Accept various truthy formats from validators
+            const ok = (typeof result === 'boolean') ? result
+              : (result && typeof result === 'object' && 'isValid' in result) ? Boolean((result as any).isValid)
+              : (typeof result === 'number') ? result === 1
+              : false;
+            if (ok) {
+              isCorrect = true;
+              break;
+            }
+          } catch (e: any) {
+            anyError = true;
+            errors.push(String(e?.message || e));
+          }
+        }
+
+        validationResult = {
+          is_correct: isCorrect,
+          feedback: isCorrect ? 'Correct! Well done!' : (anyError ? 'Validation error. Please check your grid and try again.' : 'Grid solution is incorrect. Try again.'),
+          confidence_score: isCorrect ? 1 : 0,
+          metadata: { errors }
+        };
+      } catch (error: any) {
+        validationResult = {
+          is_correct: false,
+          feedback: 'Error validating grid submission.',
+          confidence_score: 0,
+          metadata: { error: String(error?.message || error) }
+        };
+      }
+
+      const scoreData = {
+        correct: validationResult.is_correct ? 1 : 0,
+        total: 1,
+        percentage: validationResult.is_correct ? 100 : 0
+      };
+
+      const result = {
+        score: scoreData,
+        timeSpent,
+        userAnswers: answers,
+        feedback: validationResult.feedback,
+        testsPassed: undefined,
+        totalTests: undefined,
+        perQuestionTests: {},
+        perQuestionTestDetails: {},
+        hintsByQuestion: {}
+      };
+
+      try {
+        await submitAttempt(id, {
+          submission: answers,
+          time_spent_seconds: timeSpent,
+          is_correct: validationResult.is_correct,
+          score_percentage: scoreData.percentage,
+          feedback: validationResult.feedback,
+          confidence_score: validationResult.confidence_score || 0
+        }, token);
+      } catch (error) {
+        console.error('Error submitting attempt:', error);
+      }
+
+      setSubmissionResult(result);
+      setIsSubmitted(true);
+      toast({
+        title: 'Assignment Submitted!',
+        description: `You scored ${result.score.percentage}% - ${result.feedback}`,
+        variant: result.score.percentage >= 60 ? 'default' : 'destructive'
+      });
+      return; // Do not continue with non-grid flow
+    }
+    
+      // Execute validation function(s) from activity - handle multiple questions (non-grid)
     let validationResult;
     try {
       if (!activity.validation_function) {
