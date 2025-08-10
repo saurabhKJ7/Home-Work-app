@@ -102,6 +102,7 @@ def get_enhanced_rag_data(query: str, activity_type: str = None) -> List[Dict[st
     """
     # Get weighted examples
     examples = get_weighted_examples(query, top_k=5)
+    print("examples : " + str(examples))
     
     # Filter by activity type if provided
     if activity_type:

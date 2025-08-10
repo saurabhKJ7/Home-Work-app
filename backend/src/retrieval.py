@@ -47,6 +47,7 @@ def retrieve_similar_examples(query_vector: List[float], top_k: int = 3) -> List
         results = index.query(vector=query_vector, top_k=top_k, include_metadata=True)
         return results.matches
     except Exception:
+
         logger.exception("retrieve_similar_examples failed")
         return []
 
