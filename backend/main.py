@@ -838,7 +838,7 @@ def select_hint(
                 hints = []
 
         if not hints:
-            return HintResponse(hint="No hints available for this activity.", matched_index=-1, score=0.0)
+            return HintResponse(hint="Wrong answer. Try again.", matched_index=-1, score=0.0)
 
         # Derive attempt count for this student and activity to rotate hints
         try:
