@@ -5,7 +5,8 @@ from datetime import datetime
 
 class ValidationRequest(BaseModel):
     activity_id: str
-    student_response: Any
+    student_response: Optional[Any] = None
+    grid_response: Optional[List[List[int]]] = None  # For grid-based activities
     attempt_number: int = 1
     context_variables: Dict[str, Any] = {}
 
@@ -38,12 +39,24 @@ class GenerateCodeRequest(BaseModel):
 
 
 class QuestionResponse(BaseModel):
-    code: str
     question: str
     question_id: Optional[str] = None
+    type: Optional[str] = None
+    
+    # For mathematical/logical questions
+    code: Optional[str] = None
     input_example: Optional[Dict[str, Any]] = None
     expected_output: Optional[Any] = None
     validation_tests: Optional[List[Dict[str, Any]]] = None
+    
+    # For grid-based questions
+    initial_grid: Optional[List[List[int]]] = None
+    solution_grid: Optional[List[List[int]]] = None
+    validation_function: Optional[str] = None
+    grid_size: Optional[Dict[str, int]] = None
+    difficulty: Optional[str] = None
+    
+    # Common fields
     feedback_hints: Optional[List[str]] = None
 
 

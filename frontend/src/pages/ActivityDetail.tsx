@@ -683,12 +683,37 @@ const ActivityDetail = () => {
         <Card className="shadow-card">
           <CardContent className="pt-6">
             {activity.type === 'Grid-based' && (
-              <GridPuzzle
-                gridData={activity.content.grid}
-                onSubmit={handleSubmit}
-                isReadOnly={isSubmitted}
-                correctAnswer={isSubmitted ? activity.content.answer : undefined}
-              />
+              <div className="space-y-6">
+                {Array.isArray(activity.content.grid) && activity.content.grid.length > 0 ? (
+                  // New format: grid is an array of grid objects
+                  activity.content.grid.map((gridItem: any, index: number) => (
+                    <div key={gridItem.id || index} className="space-y-4">
+                      <div className="text-center">
+                        <h3 className="text-lg font-semibold mb-2">{gridItem.question || `Grid Puzzle ${index + 1}`}</h3>
+                        <div className="text-sm text-muted-foreground mb-4">
+                          {gridItem.grid_size && `${gridItem.grid_size.rows}×${gridItem.grid_size.cols} Grid`}
+                          {gridItem.difficulty && ` • ${gridItem.difficulty}`}
+                        </div>
+                      </div>
+                      <GridPuzzle
+                        gridData={gridItem.initial_grid || []}
+                        gridSize={gridItem.grid_size}
+                        onSubmit={(answers) => handleSubmit(answers)}
+                        isReadOnly={isSubmitted}
+                        correctAnswer={isSubmitted ? gridItem.solution_grid : undefined}
+                      />
+                    </div>
+                  ))
+                ) : (
+                  // Legacy format: grid is directly a 2D array
+                  <GridPuzzle
+                    gridData={activity.content.grid || []}
+                    onSubmit={handleSubmit}
+                    isReadOnly={isSubmitted}
+                    correctAnswer={isSubmitted ? activity.content.answer : undefined}
+                  />
+                )}
+              </div>
             )}
 
             {activity.type === 'Mathematical' && (

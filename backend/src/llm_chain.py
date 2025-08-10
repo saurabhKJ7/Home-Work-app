@@ -27,6 +27,16 @@ class StructuredOutput(BaseModel):
     validationTests: List[TestCase] = Field(description="Array of 10 test cases to verify correctness")
     feedbackHints: List[str] = Field(description="Exactly 10 short, hint-only feedback messages that do NOT reveal the answer")
 
+class GridStructuredOutput(BaseModel):
+    question: str = Field(description="The specific grid puzzle description with rules and objectives")
+    initialGrid: List[List[int]] = Field(description="2D array representing the initial puzzle state with 0 for empty cells")
+    solutionGrid: List[List[int]] = Field(description="2D array representing the complete solution")
+    code: str = Field(description="JavaScript function that validates a grid solution")
+    gridSize: Dict[str, int] = Field(description="Grid dimensions with 'rows' and 'cols' keys")
+    difficulty: str = Field(description="Puzzle difficulty level")
+    validationTests: List[TestCase] = Field(description="Array of 10 test cases to verify correctness")
+    feedbackHints: List[str] = Field(description="Exactly 10 short, hint-only feedback messages for incorrect attempts")
+
 
 LANGSMITH_TRACING="true"
 LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
@@ -267,6 +277,188 @@ console.log(JSON.stringify(out));
         pass
 
     return data
+
+def get_grid_function(user_prompt, activity_type="Grid-based", optimize_for_speed=False):
+    """
+    Generate a grid-based puzzle (Sudoku, number grid, etc.)
+    Returns a GridStructuredOutput with 2D array structure.
+    """
+    llm = init_openai_model()
+    
+    parser = PydanticOutputParser(pydantic_object=GridStructuredOutput)
+    format_instructions = parser.get_format_instructions()
+    
+    template = """
+You are a grid puzzle generation system that creates interactive grid-based puzzles.
+Your output must be in the following JSON format:
+{format_instructions}
+
+Given a user prompt, create a grid-based puzzle with the following requirements:
+
+1. **Grid Puzzle**: Generate a specific grid puzzle (Sudoku, number puzzle, logic grid, etc.)
+2. **Initial Grid**: 2D array with 0 representing empty cells that users need to fill
+3. **Solution Grid**: Complete 2D array showing the correct solution
+4. **Validation Function**: JavaScript function that checks if user's grid is correct
+5. **Grid Size**: Specify rows and cols (keep between 4x4 to 9x9 for usability)
+6. **Validation Tests**: Exactly 10 test cases to verify the validation function works
+7. **Feedback Hints**: 10 helpful hints for solving the puzzle
+
+USER PROMPT: "{user_prompt}"
+
+CRITICAL REQUIREMENTS:
+- initialGrid and solutionGrid must be valid 2D arrays of numbers
+- 0 represents empty cells in initialGrid
+- solutionGrid contains the complete solution
+- Grid dimensions should be reasonable (4x4 to 9x9)
+- Validation function should check row/column/region rules as appropriate
+- validationTests must test the validation function with various grid inputs
+- Make puzzles engaging but solvable
+- Interpret user queries flexibly (e.g., "greatest number" → number comparison grid puzzle)
+
+PUZZLE TYPES TO CONSIDER:
+- Sudoku (9x9 with 3x3 regions) - each row/col/region has numbers 1-9
+- Mini Sudoku (4x4 or 6x6) - each row/col has numbers 1-4 or 1-6  
+- Number placement puzzles - place numbers following specific rules
+- Logic grids with mathematical constraints - comparison, ordering, arithmetic rules
+- Greatest/smallest number puzzles - arrange numbers in ascending/descending order
+- Magic squares - rows/columns/diagonals sum to same value
+
+VALIDATION FUNCTION REQUIREMENTS:
+- Function name: validateGrid
+- Parameter: grid (2D array)
+- Returns: boolean (true if valid solution)
+- Check all puzzle-specific rules (no duplicates in rows/cols/regions for Sudoku)
+
+VALIDATION TESTS REQUIREMENTS:
+- Generate exactly 10 test cases for the validation function
+- Include both valid and invalid grid examples
+- Test edge cases like empty grids, partially filled grids, incorrect solutions
+- Each test case should have: {{"input": {{"grid": [[...]]}}, "expectedOutput": true/false}}
+- Make sure the validation function passes all tests
+
+Your output must strictly follow the JSON format described above.
+"""
+    
+    prompt = PromptTemplate(
+        template=template,
+        input_variables=["user_prompt", "format_instructions"]
+    )
+    
+    chain = prompt | llm | parser
+    
+    result = chain.invoke({
+        "user_prompt": user_prompt,
+        "format_instructions": format_instructions
+    })
+    
+    logger.info("get_grid_function: generated grid puzzle %dx%d", 
+               result.gridSize.get("rows", 0), result.gridSize.get("cols", 0))
+    
+    # Skip validation pipeline if optimizing for speed
+    if optimize_for_speed:
+        logger.info("get_grid_function: skipping validation pipeline (speed optimization)")
+        return result
+    
+    # Apply the same validation pipeline as get_evaluate_function
+    try:
+        logger.info("get_grid_function: validating grid validation function with E2B sandbox")
+        
+        # Run validation tests for the grid validation function
+        validation_summary = run_validation_tests_in_sandbox(result.code, result.validationTests)
+        total_tests = len(result.validationTests)
+        passed_tests = validation_summary.get("passed", 0)
+        
+        logger.info("get_grid_function: validation tests %d/%d passed", passed_tests, total_tests)
+        
+        # Auto-correct test expectedOutput values if needed
+        if passed_tests < total_tests:
+            logger.info("get_grid_function: auto-correcting validation test expectedOutput values")
+            test_results = validation_summary.get("results", [])
+            
+            corrected_tests = []
+            corrections_made = 0
+            
+            for i, test in enumerate(result.validationTests):
+                if i < len(test_results) and test_results[i].get("actual") is not None:
+                    actual_result = test_results[i]["actual"]
+                    corrected_test = TestCase(
+                        input=test.input,
+                        expectedOutput=actual_result
+                    )
+                    corrected_tests.append(corrected_test)
+                    
+                    if test.expectedOutput != actual_result:
+                        corrections_made += 1
+                        logger.debug("get_grid_function: corrected test[%d]: expected=%s -> %s", 
+                                   i, test.expectedOutput, actual_result)
+                else:
+                    corrected_tests.append(test)
+            
+            result.validationTests = corrected_tests
+            logger.info("get_grid_function: auto-corrected %d/%d validation test expectedOutput values", 
+                       corrections_made, len(corrected_tests))
+            
+            # Re-run validation to confirm corrections
+            final_summary = run_validation_tests_in_sandbox(result.code, result.validationTests)
+            final_passed = final_summary.get("passed", 0)
+            logger.info("get_grid_function: final validation tests %d/%d passed", final_passed, total_tests)
+    
+    except Exception as e:
+        logger.exception("get_grid_function: validation pipeline failed: %s", e)
+    
+    return result
+
+def validate_grid_response(validation_function: str, grid_response: List[List[int]]) -> Dict[str, Any]:
+    """
+    Validate a grid response using the generated validation function in E2B sandbox.
+    """
+    try:
+        # Create JavaScript code to run validation
+        validation_code = f"""
+{validation_function}
+
+const gridResponse = {json.dumps(grid_response)};
+const isValid = validateGrid(gridResponse);
+console.log(JSON.stringify({{ isValid: isValid, grid: gridResponse }}));
+"""
+        
+        # Execute in E2B sandbox
+        E2B_API_KEY = os.environ.get("E2B_API_KEY")
+        if not E2B_API_KEY:
+            logger.error("E2B_API_KEY is not set. Cannot validate grid response.")
+            return {
+                "is_correct": False,
+                "feedback": "Validation service unavailable",
+                "confidence_score": 0.0,
+                "error": "E2B_API_KEY not set"
+            }
+        
+        with Sandbox(template="base", api_key=E2B_API_KEY) as sb:
+            sb.files.write("validate_grid.js", validation_code)
+            exec_result = sb.commands.run("node validate_grid.js")
+            
+            output = exec_result.stdout or exec_result.stderr or "{}"
+            result_data = json.loads(output.strip())
+            
+            is_valid = result_data.get("isValid", False)
+            
+            logger.info("validate_grid_response: grid_valid=%s", is_valid)
+            
+            return {
+                "is_correct": is_valid,
+                "feedback": "Correct solution!" if is_valid else "Grid solution is incorrect. Check the rules and try again.",
+                "confidence_score": 1.0 if is_valid else 0.0,
+                "grid_checked": result_data.get("grid", grid_response)
+            }
+            
+    except Exception as e:
+        logger.exception("validate_grid_response: validation failed")
+        return {
+            "is_correct": False,
+            "feedback": "Error validating grid response",
+            "confidence_score": 0.0,
+            "error": str(e)
+        }
 
 def get_evaluate_function(rag_data, user_prompt, optimize_for_speed=False):
     """

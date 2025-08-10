@@ -48,28 +48,51 @@ const mockActivities: Activity[] = [
   }
 ];
 
-// Mock generated content
-const mockGeneratedContent = {
-  grid: [
-    [5, 3, 0, 0, 7, 0, 0, 0, 0],
-    [6, 0, 0, 1, 9, 5, 0, 0, 0],
-    [0, 9, 8, 0, 0, 0, 0, 6, 0],
-    [8, 0, 0, 0, 6, 0, 0, 0, 3],
-    [4, 0, 0, 8, 0, 3, 0, 0, 1],
-    [7, 0, 0, 0, 2, 0, 0, 0, 6],
-    [0, 6, 0, 0, 0, 0, 2, 8, 0],
-    [0, 0, 0, 4, 1, 9, 0, 0, 5],
-    [0, 0, 0, 0, 8, 0, 0, 7, 9]
-  ],
-  math: [
-    { id: "1", question: "Solve for x: 2x + 5 = 13", answer: 4 },
-    { id: "2", question: "What is 15% of 80?", answer: 12 },
-    { id: "3", question: "If y = 3x - 2 and x = 5, what is y?", answer: 13 }
-  ],
-  logic: [
-    { id: "1", question: "What comes next in the sequence: 2, 6, 18, 54, ?", type: "text" as const, answer: "162" },
-    { id: "2", question: "If all cats are animals and some animals are pets, which is true?", type: "multiple-choice" as const, options: ["All cats are pets", "Some cats might be pets", "No cats are pets", "All pets are cats"], answer: "Some cats might be pets" }
-  ]
+// Helper function to create dynamic content based on generated questions
+const createDynamicContent = (questions: any[], activityType: string) => {
+  const content: any = {};
+  
+  if (activityType === 'Grid-based') {
+    // Handle grid-based questions
+    content.grid = questions.map((q: any, index: number) => ({
+      id: String(index + 1),
+      question: q.question,
+      question_id: q.question_id,
+      initial_grid: q.initial_grid,
+      solution_grid: q.solution_grid,
+      validation_function: q.validation_function,
+      grid_size: q.grid_size,
+      difficulty: q.difficulty,
+      feedback_hints: q.feedback_hints || []
+    }));
+  } else if (activityType === 'Mathematical') {
+    content.math = questions.map((q: any, index: number) => ({
+      id: String(index + 1),
+      question: q.question,
+      answer: 0, // Will be calculated from validation function
+      code: q.code,
+      question_id: q.question_id,
+      input_example: q.input_example,
+      expected_output: q.expected_output,
+      validation_tests: q.validation_tests || [],
+      feedback_hints: q.feedback_hints || []
+    }));
+  } else if (activityType === 'Logical') {
+    content.logic = questions.map((q: any, index: number) => ({
+      id: String(index + 1),
+      question: q.question,
+      type: "text" as const,
+      answer: "",
+      code: q.code,
+      question_id: q.question_id,
+      input_example: q.input_example,
+      expected_output: q.expected_output,
+      validation_tests: q.validation_tests || [],
+      feedback_hints: q.feedback_hints || []
+    }));
+  }
+  
+  return content;
 };
 
 const TeacherDashboard = () => {
@@ -334,37 +357,8 @@ const TeacherDashboard = () => {
         throw new Error("No questions were generated");
       }
 
-      // Build preview content based on type and number of questions
-      let previewContent: any = { ...mockGeneratedContent };
-      
-      if (formData.type === 'Mathematical') {
-        previewContent = {
-          math: questions.map((q: any, index: number) => ({
-            id: String(index + 1),
-            question: q.question,
-            answer: 0, // Will be calculated from validation function
-            code: q.code,
-            question_id: q.question_id,
-            input_example: q.input_example,
-            expected_output: q.expected_output,
-            validation_tests: q.validation_tests
-          }))
-        };
-      } else if (formData.type === 'Logical') {
-        previewContent = {
-          logic: questions.map((q: any, index: number) => ({
-            id: String(index + 1),
-            question: q.question,
-            type: "text" as const,
-            answer: "",
-            code: q.code,
-            question_id: q.question_id,
-            input_example: q.input_example,
-            expected_output: q.expected_output,
-            validation_tests: q.validation_tests
-          }))
-        };
-      }
+      // Build preview content dynamically based on generated questions
+      const previewContent = createDynamicContent(questions, formData.type);
 
       // Store all questions for activity creation
       previewContent.questions = questions;
@@ -381,6 +375,7 @@ const TeacherDashboard = () => {
       // Select up to 5 random tests per question and initialize teacher response fields
       const selected: Record<string, any[]> = {};
       const responses: Record<string, string[]> = {};
+      
       if (formData.type === 'Mathematical' && previewContent.math) {
         for (const item of previewContent.math) {
           const sample = pickRandomTests(item.validation_tests, 5);
@@ -392,6 +387,12 @@ const TeacherDashboard = () => {
           const sample = pickRandomTests(item.validation_tests, 5);
           selected[item.id] = sample;
           responses[item.id] = sample.map(() => '');
+        }
+      } else if (formData.type === 'Grid-based' && previewContent.grid) {
+        // For grid-based, we don't need random tests - the validation is the grid itself
+        for (const item of previewContent.grid) {
+          selected[item.id] = [];
+          responses[item.id] = [];
         }
       }
       setTeacherSelectedTests(selected);
@@ -656,13 +657,44 @@ const TeacherDashboard = () => {
                         <p className="text-sm mt-2">{previewActivity.problemStatement}</p>
                       </div>
 
-                      {previewActivity.type === 'Grid-based' && (
-                        <div className="scale-50 origin-top">
-                          <GridPuzzle 
-                            gridData={previewActivity.content.grid} 
-                            onSubmit={() => {}} 
-                            isReadOnly 
-                          />
+                      {previewActivity.type === 'Grid-based' && Array.isArray(previewActivity.content.grid) && (
+                        <div className="space-y-4">
+                          {previewActivity.content.grid.map((gridItem: any) => (
+                            <div key={gridItem.id} className="space-y-2">
+                              <div className="p-3 bg-muted/20 rounded">
+                                <h4 className="font-medium mb-2">Grid Puzzle {gridItem.id}</h4>
+                                <p className="text-sm text-muted-foreground mb-3">{gridItem.question}</p>
+                                <div className="text-xs text-muted-foreground mb-2">
+                                  Grid Size: {gridItem.grid_size?.rows || 'N/A'}x{gridItem.grid_size?.cols || 'N/A'} | 
+                                  Difficulty: {gridItem.difficulty || 'Unknown'}
+                                </div>
+                                <div className="scale-75 origin-top-left">
+                                  <GridPuzzle 
+                                    gridData={gridItem.initial_grid || []} 
+                                    gridSize={gridItem.grid_size}
+                                    onSubmit={() => {}} 
+                                    isReadOnly 
+                                  />
+                                </div>
+                                <div className="mt-2">
+                                  <details className="text-xs">
+                                    <summary className="cursor-pointer text-muted-foreground">View Solution Grid</summary>
+                                    <div className="mt-2 p-2 bg-muted/10 rounded">
+                                      <pre className="text-xs">{JSON.stringify(gridItem.solution_grid, null, 2)}</pre>
+                                    </div>
+                                  </details>
+                                </div>
+                                <div className="mt-2">
+                                  <details className="text-xs">
+                                    <summary className="cursor-pointer text-muted-foreground">View Validation Function</summary>
+                                    <div className="mt-2 p-2 bg-muted/10 rounded">
+                                      <pre className="text-xs">{gridItem.validation_function}</pre>
+                                    </div>
+                                  </details>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
 
