@@ -40,7 +40,7 @@ def get_index(index_name=None):
     
     return pc.Index(index_name)
 
-def retrieve_similar_examples(query_vector: List[float], top_k: int = 3) -> List[Dict[str, Any]]:
+def retrieve_similar_examples(query_vector: List[float], top_k: int = 1) -> List[Dict[str, Any]]:
     """Retrieve similar examples from Pinecone"""
     try:
         index = get_index()
