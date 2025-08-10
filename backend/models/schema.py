@@ -30,6 +30,7 @@ class GenerateCodeRequest(BaseModel):
     type: Optional[str] = None
     difficulty: Optional[str] = None
     num_questions: Optional[int] = 1  # Number of questions to generate
+    optimize_for_speed: Optional[bool] = False  # Skip 100% pass validation for faster generation
     input: Optional[str] = None  # For backward compatibility, will be removed in future
 
     class Config:

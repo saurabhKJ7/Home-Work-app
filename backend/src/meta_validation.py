@@ -4,7 +4,6 @@ Meta-validation framework to assess the accuracy of generated validation functio
 import json
 from typing import Dict, List, Any, Tuple
 from utils.logger import get_logger
-from .sandbox import sandbox  # Import mock sandbox instance
 logger = get_logger("meta_validation")
 
 def execute_validation_function(validation_function: str, test_input: Dict[str, Any]) -> Dict[str, Any]:
@@ -21,9 +20,9 @@ def execute_validation_function(validation_function: str, test_input: Dict[str, 
     """
     
     try:
-        sandbox.files.write("validation_test.js", wrapper)
-        execution = sandbox.commands.run("node validation_test.js")
-        output = execution.stdout or execution.stderr
+        # Sandbox disabled (mock removed). Return a safe default indicating execution not performed.
+        logger.warning("execute_validation_function called but sandbox is disabled. Configure E2B to enable execution.")
+        output = '{"is_correct": false, "execution_failed": true, "error": "sandbox_disabled"}'
         
         # Parse the JSON output
         result = json.loads(output.strip())
