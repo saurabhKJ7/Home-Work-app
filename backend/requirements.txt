@@ -10,7 +10,6 @@ langchain-anthropic
 
 # Vector + embeddings
 pinecone
-sentence-transformers
 rank-bm25
 
 # Database
