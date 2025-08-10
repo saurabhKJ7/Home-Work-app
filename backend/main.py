@@ -220,35 +220,45 @@ async def generate_code(
             payload.type
         )
         
-        # Generate multiple questions
-        for i in range(num_questions):
-            # Add variation to the prompt for each question to get different results
-            varied_query = payload.user_query
-            if i > 0:
-                varied_query = f"{payload.user_query} (Question {i+1} - generate a different variation)"
-            
-            # Generate code using improved function
-            result = get_evaluate_function(rag_data, varied_query)
-
-            # Optionally run validation tests in sandbox and print debug summary
+        # OPTIMIZED: Remove redundant validation (already done in get_evaluate_function)
+        import uuid
+        import concurrent.futures
+        
+        def generate_single_question(question_index):
+            """Generate a single question (for parallel execution)"""
             try:
-                tests = getattr(result, 'validationTests', []) or []
-                if tests:
-                    logger.info("/generate-code: running %d tests for question %d", len(tests), i + 1)
-                    test_summary = run_validation_tests_in_sandbox(result.code, tests)
-                    total = int(test_summary.get('total', 0))
-                    passed = int(test_summary.get('passed', 0))
-                    failed = max(0, total - passed)
-                    logger.info("/generate-code: tests total=%d passed=%d failed=%d", total, passed, failed)
-                else:
-                    logger.warning("/generate-code: model returned no validation tests")
-            except Exception as test_err:
-                logger.exception("/generate-code: test execution failed")
-            
-            # Create unique question ID
-            question_id = f"q_{i+1}_{int(datetime.now().timestamp())}"
-            
-            # Add the generated question to the list
+                # Add variation to the prompt for each question
+                varied_query = payload.user_query
+                if question_index > 0:
+                    varied_query = f"{payload.user_query} (Question {question_index+1} - generate a different variation)"
+                
+                # Generate code using improved function (validation already included)
+                result = get_evaluate_function(rag_data, varied_query, optimize_for_speed=payload.optimize_for_speed)
+                
+                # Create unique question ID
+                question_id = str(uuid.uuid4())
+                
+                # Build response
+                question_data = {
+                    "code": result.code,
+                    "question": result.question,
+                    "question_id": question_id,
+                    "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
+                    "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
+                    "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
+                }
+                
+                logger.info("/generate-code: completed question %d", question_index + 1)
+                return question_data
+                
+            except Exception as e:
+                logger.exception("/generate-code: failed to generate question %d", question_index + 1)
+                raise e
+        
+        # For single question, process directly (most common case)
+        if num_questions == 1:
+            result = get_evaluate_function(rag_data, payload.user_query, optimize_for_speed=payload.optimize_for_speed)
+            question_id = str(uuid.uuid4())
             questions.append({
                 "code": result.code,
                 "question": result.question,
@@ -257,6 +267,30 @@ async def generate_code(
                 "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
                 "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
             })
+        else:
+            # For multiple questions, use parallel processing
+            logger.info("/generate-code: generating %d questions in parallel", num_questions)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_questions, 3)) as executor:
+                # Submit all question generation tasks
+                future_to_index = {executor.submit(generate_single_question, i): i for i in range(num_questions)}
+                
+                # Collect results as they complete
+                results_dict = {}
+                for future in concurrent.futures.as_completed(future_to_index):
+                    try:
+                        question_index = future_to_index[future]
+                        question_data = future.result()
+                        results_dict[question_index] = question_data
+                    except Exception as e:
+                        logger.exception("/generate-code: question generation failed")
+                        # Continue with other questions
+                
+                # Add results in original order
+                for i in range(num_questions):
+                    if i in results_dict:
+                        questions.append(results_dict[i])
+            
+            logger.info("/generate-code: completed %d questions", len(questions))
         
         # Return multiple questions
         return {
