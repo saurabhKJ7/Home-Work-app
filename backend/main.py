@@ -31,7 +31,7 @@ from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from pydantic import BaseModel as PBase
-from src.llm_chain import get_evaluate_function, run_validation_tests_in_sandbox
+from src.llm_chain import get_evaluate_function, get_grid_function, run_validation_tests_in_sandbox, validate_grid_response
 from src.retrieval import retrieve_similar_examples, get_embeddings
 from src.validation_pipeline import run_validation_pipeline, validate_student_submission
 from models.db_models import Activity as DBActivity
@@ -232,21 +232,42 @@ async def generate_code(
                 if question_index > 0:
                     varied_query = f"{payload.user_query} (Question {question_index+1} - generate a different variation)"
                 
-                # Generate code using improved function (validation already included)
-                result = get_evaluate_function(rag_data, varied_query, optimize_for_speed=payload.optimize_for_speed)
+                # Generate based on activity type
+                if payload.type == "Grid-based":
+                    # Use grid-specific generation
+                    result = get_grid_function(varied_query, payload.type, payload.optimize_for_speed)
+                else:
+                    # Use regular math/logic generation
+                    result = get_evaluate_function(rag_data, varied_query, optimize_for_speed=payload.optimize_for_speed)
                 
                 # Create unique question ID
                 question_id = str(uuid.uuid4())
                 
-                # Build response
-                question_data = {
-                    "code": result.code,
-                    "question": result.question,
-                    "question_id": question_id,
-                    "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
-                    "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                    "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
-                }
+                # Build response based on result type
+                if payload.type == "Grid-based":
+                    question_data = {
+                        "question": result.question,
+                        "question_id": question_id,
+                        "type": "Grid-based",
+                        "initial_grid": result.initialGrid,
+                        "solution_grid": result.solutionGrid,
+                        "validation_function": result.code,
+                        "code": result.code,
+                        "grid_size": result.gridSize,
+                        "difficulty": result.difficulty,
+                        "feedback_hints": result.feedbackHints
+                    }
+                else:
+                    question_data = {
+                        "code": result.code,
+                        "question": result.question,
+                        "question_id": question_id,
+                        "type": payload.type,
+                        "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
+                        "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
+                        "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
+                        "feedback_hints": result.feedbackHints if hasattr(result, 'feedbackHints') else []
+                    }
                 
                 logger.info("/generate-code: completed question %d", question_index + 1)
                 return question_data
@@ -257,16 +278,35 @@ async def generate_code(
         
         # For single question, process directly (most common case)
         if num_questions == 1:
-            result = get_evaluate_function(rag_data, payload.user_query, optimize_for_speed=payload.optimize_for_speed)
-            question_id = str(uuid.uuid4())
-            questions.append({
-                "code": result.code,
-                "question": result.question,
-                "question_id": question_id,
-                "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
-                "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
-            })
+            if payload.type == "Grid-based":
+                result = get_grid_function(payload.user_query, payload.type, payload.optimize_for_speed)
+
+                question_id = str(uuid.uuid4())
+                questions.append({
+                    "question": result.question,
+                    "question_id": question_id,
+                    "type": "Grid-based",
+                    "initial_grid": result.initialGrid,
+                    "solution_grid": result.solutionGrid,
+                    "validation_function": result.code,
+                    "code": result.code,
+                    "grid_size": result.gridSize,
+                    "difficulty": result.difficulty,
+                    "feedback_hints": result.feedbackHints
+                })
+            else:
+                result = get_evaluate_function(rag_data, payload.user_query, optimize_for_speed=payload.optimize_for_speed)
+                question_id = str(uuid.uuid4())
+                questions.append({
+                    "code": result.code,
+                    "question": result.question,
+                    "question_id": question_id,
+                    "type": payload.type,
+                    "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
+                    "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
+                    "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
+                    "feedback_hints": result.feedbackHints if hasattr(result, 'feedbackHints') else []
+                })
         else:
             # For multiple questions, use parallel processing
             logger.info("/generate-code: generating %d questions in parallel", num_questions)
@@ -337,13 +377,40 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
                 )
 
         try:
-            # Validate submission
-            result = validate_student_submission(
-                activity.validation_function,
-                payload.student_response,
-                activity.type,
-                payload.attempt_number
-            )
+            # Handle different validation types based on activity type
+            if activity.type == "Grid-based" and payload.grid_response is not None:
+                # For grid-based activities, use grid validation
+                grid_validation_function = activity.validation_function or ""
+                if not grid_validation_function:
+                    # Try to get validation function from ui_config for grid activities
+                    ui_config = activity.ui_config or {}
+                    grid_items = ui_config.get("grid", [])
+                    if grid_items and len(grid_items) > 0:
+                        grid_validation_function = grid_items[0].get("validation_function", "")
+                
+                if grid_validation_function:
+                    validation_result = validate_grid_response(grid_validation_function, payload.grid_response)
+                    result = ValidationResponse(
+                        is_correct=validation_result["is_correct"],
+                        feedback=validation_result["feedback"],
+                        confidence_score=validation_result["confidence_score"],
+                        metadata=validation_result
+                    )
+                else:
+                    result = ValidationResponse(
+                        is_correct=False,
+                        feedback="No validation function available for this grid activity.",
+                        confidence_score=0.0,
+                        metadata={"error": "no_validation_function"}
+                    )
+            else:
+                # For non-grid activities, use regular validation
+                result = validate_student_submission(
+                    activity.validation_function,
+                    payload.student_response,
+                    activity.type,
+                    payload.attempt_number
+                )
             
             # Incorporate model-provided hints if available on the activity
             if hasattr(activity, "feedback_hints") and activity.feedback_hints and not result.is_correct:

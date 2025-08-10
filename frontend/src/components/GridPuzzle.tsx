@@ -7,16 +7,29 @@ interface GridPuzzleProps {
   onSubmit: (answers: number[][]) => void;
   isReadOnly?: boolean;
   correctAnswer?: number[][];
+  gridSize?: { rows: number; cols: number };
 }
 
-const GridPuzzle = ({ gridData, onSubmit, isReadOnly = false, correctAnswer }: GridPuzzleProps) => {
+const GridPuzzle = ({ gridData, onSubmit, isReadOnly = false, correctAnswer, gridSize }: GridPuzzleProps) => {
+  // Validate and sanitize gridData
+  const sanitizedGridData = Array.isArray(gridData) && gridData.length > 0
+    ? gridData.map(row => Array.isArray(row) ? row : [])
+    : [[0]]; // Default to 1x1 grid if invalid
+  
   const [answers, setAnswers] = useState<number[][]>(
-    gridData.map(row => row.map(cell => cell === 0 ? 0 : cell))
+    sanitizedGridData.map(row => row.map(cell => cell === 0 ? 0 : cell))
   );
   const [selectedCell, setSelectedCell] = useState<{row: number; col: number} | null>(null);
 
+  // Log debug info if gridData is invalid
+  if (!Array.isArray(gridData) || gridData.length === 0) {
+    console.warn('[GridPuzzle] Invalid gridData:', gridData);
+  } else if (gridData.some(row => !Array.isArray(row))) {
+    console.warn('[GridPuzzle] Some rows are not arrays:', gridData);
+  }
+
   const handleCellChange = (row: number, col: number, value: string) => {
-    if (isReadOnly || gridData[row][col] !== 0) return;
+    if (isReadOnly || sanitizedGridData[row][col] !== 0) return;
     
     const numValue = value === '' ? 0 : parseInt(value) || 0;
     if (numValue < 0 || numValue > 9) return;
@@ -27,12 +40,12 @@ const GridPuzzle = ({ gridData, onSubmit, isReadOnly = false, correctAnswer }: G
   };
 
   const handleCellClick = (row: number, col: number) => {
-    if (isReadOnly || gridData[row][col] !== 0) return;
+    if (isReadOnly || sanitizedGridData[row][col] !== 0) return;
     setSelectedCell({ row, col });
   };
 
   const getCellClassName = (row: number, col: number) => {
-    const isOriginal = gridData[row][col] !== 0;
+    const isOriginal = sanitizedGridData[row][col] !== 0;
     const isSelected = selectedCell?.row === row && selectedCell?.col === col;
     const isCorrect = correctAnswer ? answers[row][col] === correctAnswer[row][col] : null;
     const isIncorrect = correctAnswer ? answers[row][col] !== 0 && answers[row][col] !== correctAnswer[row][col] : null;
@@ -54,9 +67,15 @@ const GridPuzzle = ({ gridData, onSubmit, isReadOnly = false, correctAnswer }: G
     return className;
   };
 
+  const cols = gridSize?.cols || sanitizedGridData[0]?.length || 9;
+  const rows = gridSize?.rows || sanitizedGridData.length || 9;
+
   return (
     <div className="flex flex-col items-center space-y-6">
-      <div className="grid grid-cols-9 gap-1 p-4 bg-subtle-gradient rounded-lg shadow-card">
+      <div 
+        className={`grid gap-1 p-4 bg-subtle-gradient rounded-lg shadow-card`}
+        style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
+      >
         {answers.map((row, rowIndex) => 
           row.map((cell, colIndex) => (
             <div
@@ -64,8 +83,8 @@ const GridPuzzle = ({ gridData, onSubmit, isReadOnly = false, correctAnswer }: G
               className={getCellClassName(rowIndex, colIndex)}
               onClick={() => handleCellClick(rowIndex, colIndex)}
             >
-              {gridData[rowIndex][colIndex] !== 0 ? (
-                <span className="leading-12">{gridData[rowIndex][colIndex]}</span>
+              {sanitizedGridData[rowIndex][colIndex] !== 0 ? (
+                <span className="leading-12">{sanitizedGridData[rowIndex][colIndex]}</span>
               ) : (
                 <Input
                   type="text"
