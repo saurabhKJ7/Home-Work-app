@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: homework-backend
+    env: docker
+    plan: free
+    dockerfilePath: backend/Dockerfile
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      # Set these in Render dashboard or here with values
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: LANGSMITH_API_KEY
+        sync: false
+      - key: LANGSMITH_TRACING
+        value: "false"
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: PINECONE_ENVIRONMENT
+        sync: false
+      - key: PINECONE_INDEX
+        sync: false
+
+  - type: web
+    name: homework-frontend
+    env: docker
+    plan: free
+    dockerfilePath: frontend/Dockerfile
+    autoDeploy: true
+    envVars:
+      # Set to your backend public URL after first deploy, e.g. https://homework-backend.onrender.com
+      - key: VITE_API_BASE_URL
+        sync: false
+
+

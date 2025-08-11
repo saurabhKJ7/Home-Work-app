@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual envs
+.venv/
+venv/
+env/
+myenv/
+
+# Local env files
+.env
+.env.*
+
+# VCS
+.git
+.gitignore
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Tests and data not needed in image
+tests/
+**/node_modules/
+data/
+scripts/
+migrations/*.md
+
+
