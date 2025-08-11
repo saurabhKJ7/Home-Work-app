@@ -25,14 +25,15 @@ FROM nginx:alpine AS runtime
 # Copy build output
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 
-# Copy nginx template and start script
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+# Copy nginx templates
+COPY nginx.conf.template /etc/nginx/templates/proxy.conf.template
+COPY nginx.spa.conf.template /etc/nginx/templates/spa.conf.template
 
-# Use envsubst to inject PORT and BACKEND_URL at runtime, then start nginx
+# Use envsubst to inject PORT and BACKEND_URL at runtime, choose proxy if BACKEND_URL set
 ENV PORT=10000
 ENV BACKEND_URL=
 
 EXPOSE 10000
-CMD sh -c 'envsubst "\$PORT\$BACKEND_URL" < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g "daemon off;"'
+CMD sh -c 'if [ -n "$BACKEND_URL" ]; then envsubst "\$PORT\$BACKEND_URL" < /etc/nginx/templates/proxy.conf.template > /etc/nginx/conf.d/default.conf; else envsubst "\$PORT" < /etc/nginx/templates/spa.conf.template > /etc/nginx/conf.d/default.conf; fi && nginx -g "daemon off;"'
 
 
