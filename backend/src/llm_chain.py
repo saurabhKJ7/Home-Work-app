@@ -284,6 +284,7 @@ def get_grid_function(user_prompt, activity_type="Grid-based", optimize_for_spee
     Returns a GridStructuredOutput with 2D array structure.
     """
     llm = init_openai_model()
+    #   llm=init_anthropic_model()
     
     parser = PydanticOutputParser(pydantic_object=GridStructuredOutput)
     format_instructions = parser.get_format_instructions()
