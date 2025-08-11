@@ -27,8 +27,7 @@ export async function postJson<T = any>(path: string, body: any, token?: string)
       method: "POST",
       headers,
       body: JSON.stringify(body),
-      mode: 'cors', // Explicitly request CORS
-      credentials: 'include' // Include credentials for cookies
+      mode: 'cors'
     });
     
     if (!res.ok) {
@@ -69,8 +68,7 @@ export async function getJson<T = any>(path: string, token?: string): Promise<T>
     const res = await fetch(url, {
       method: 'GET',
       headers,
-      mode: 'cors', // Explicitly request CORS
-      credentials: 'include' // Include credentials for cookies
+      mode: 'cors'
     });
     
     if (!res.ok) {

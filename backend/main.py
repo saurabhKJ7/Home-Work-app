@@ -64,35 +64,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Custom CORS middleware to ensure headers are always sent
-from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import JSONResponse
+# CORS configuration: allow only the configured frontend origin with credentials
+frontend_origin = os.getenv("FRONTEND_URL")
+allowed_origins = [frontend_origin] if frontend_origin else []
 
-class CustomCORSMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        # Handle preflight requests
-        if request.method == "OPTIONS":
-            response = JSONResponse(content={})
-        else:
-            response = await call_next(request)
-            
-        # Add CORS headers to every response
-        response.headers["Access-Control-Allow-Origin"] = os.getenv("FRONTEND_URL")
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-        
-        return response
-
-# Add custom CORS middleware
-app.add_middleware(CustomCORSMiddleware)
-
-# Standard FastAPI CORS middleware as backup
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
