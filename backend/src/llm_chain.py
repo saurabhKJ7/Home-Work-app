@@ -514,6 +514,14 @@ IMPORTANT RULES:
 - :x: Do NOT return a generic utility function.
 - :x: Do NOT include any extra explanation, markdown, or natural language outside the JSON object.
 
+TOPIC ADHERENCE RULES:
+ - You MUST align the generated problem with the topic stated in USER QUERY. Do not switch domains.
+ - If the USER QUERY references a physics topic (e.g., "Newton's laws of motion"), create a numerical word problem that applies that topic (e.g., F = m × a, friction, net force, momentum) and generate code that solves it.
+ - DO NOT generate matrix, vector, or unrelated linear algebra tasks unless the USER QUERY explicitly asks for them.
+ - Prefer simple numeric inputs with units and realistic values. Include units in the question text but return numeric outputs from code.
+
+
+
 CRITICAL TEST CASE GENERATION RULES:
 - For every test in validationTests YOU MUST:
   • Step 1: Write down the input values clearly
