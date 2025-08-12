@@ -2,10 +2,13 @@
 Test case generator for validation functions
 """
 from typing import Dict, Any, List, Tuple
+import os
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import json
+
+DEFAULT_GPT_MODEL = os.getenv("GPT_MODEL", "gpt-5-mini")
 
 def generate_test_cases(
     prompt: str,
@@ -25,7 +28,7 @@ def generate_test_cases(
     Returns:
         Tuple of (test_cases, expected_outcomes)
     """
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+    llm = ChatOpenAI(model=DEFAULT_GPT_MODEL, temperature=0.3)
     
     template = """
     You are an expert test case generator for educational activities.

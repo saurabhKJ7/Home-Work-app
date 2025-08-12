@@ -2,6 +2,7 @@
 Adaptive feedback generator for different response types
 """
 from typing import Dict, Any, List
+import os
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -11,7 +12,8 @@ def generate_feedback(
     prompt: str,
     submission: Any,
     attempt_number: int = 1,
-    activity_type: str = None
+    activity_type: str = None,
+    hints: List[str] | None = None
 ) -> Dict[str, Any]:
     """
     Generate contextually appropriate feedback based on correctness and attempt number
@@ -131,6 +133,8 @@ def add_activity_specific_guidance(
     
     return base_feedback
 
+DEFAULT_GPT_MODEL = os.getenv("GPT_MODEL", "gpt-5-mini")
+
 def generate_llm_feedback(
     prompt: str,
     submission: Any,
@@ -151,7 +155,7 @@ def generate_llm_feedback(
     Returns:
         Detailed feedback text
     """
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
+    llm = ChatOpenAI(model=DEFAULT_GPT_MODEL, temperature=0.3)
     
     template = """
     You are an educational feedback generator for {activity_type} activities.

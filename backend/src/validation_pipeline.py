@@ -2,6 +2,7 @@
 Automated validation pipeline for quality assurance
 """
 from typing import Dict, Any, List, Optional
+import os
 from src.validation_generator import generate_validation_function
 from src.test_generator import generate_test_cases
 from src.meta_validation import validate_function
@@ -10,11 +11,13 @@ from utils.logger import get_logger
 logger = get_logger("validation_pipeline")
 from models.schema import ValidationResponse
 
+DEFAULT_GPT_MODEL = os.getenv("GPT_MODEL", "gpt-5-mini")
+
 def run_validation_pipeline(
     prompt: str,
     activity_type: str,
     correct_answers: Optional[List[Any]] = None,
-    model_name: str = "gpt-4o",
+    model_name: str = DEFAULT_GPT_MODEL,
     confidence_threshold: float = 0.8
 ) -> Dict[str, Any]:
     """

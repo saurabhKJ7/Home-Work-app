@@ -43,6 +43,7 @@ LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
 LANGSMITH_API_KEY=os.getenv("LANGSMITH_API_KEY")
 LANGSMITH_PROJECT="Home-Work"
 OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY")
+GPT_MODEL=os.environ.get("GPT_MODEL", "gpt-5-mini")
 
 def init_anthropic_model():
     """Initialize Anthropic model"""
@@ -65,7 +66,7 @@ def init_openai_model():
         raise ValueError("OpenAI API key must be set")
     
     return ChatOpenAI(
-        model="gpt-5-mini",
+        model=GPT_MODEL,
         openai_api_key=api_key,)
 
 
@@ -647,7 +648,7 @@ Generate the corrected validationTests array:
             
             # Use higher temperature for more diverse test generation
             test_llm = ChatOpenAI(
-                model="gpt-5-mini",
+                model=GPT_MODEL,
                 openai_api_key=os.environ.get("OPENAI_API_KEY"),
                 temperature=0.7
             )

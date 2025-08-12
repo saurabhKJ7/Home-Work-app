@@ -2,6 +2,7 @@
 Improved validation function generator with standardized templates and error handling
 """
 from typing import Dict, Any, List
+import os
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain.prompts import PromptTemplate
@@ -33,10 +34,12 @@ def get_template_for_activity_type(activity_type: str) -> str:
         # Default to grid template
         return GRID_VALIDATION_TEMPLATE
 
+DEFAULT_GPT_MODEL = os.getenv("GPT_MODEL", "gpt-5-mini")
+
 def generate_validation_function(
     prompt: str,
     activity_type: str,
-    model_name: str = "gpt-4o"
+    model_name: str = DEFAULT_GPT_MODEL
 ) -> Dict[str, str]:
     """
     Generate a validation function using templates and improved RAG
@@ -67,7 +70,8 @@ def generate_validation_function(
     elif "claude" in model_name.lower():
         llm = ChatAnthropic(model=model_name, temperature=0.2)
     else:
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
+        # Fallback to env default rather than hardcoding
+        llm = ChatOpenAI(model=DEFAULT_GPT_MODEL, temperature=0.2)
     
     # Create prompt template for validation function
     validation_prompt_template = """
