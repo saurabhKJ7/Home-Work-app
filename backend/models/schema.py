@@ -70,6 +70,8 @@ class FeedbackRequest(BaseModel):
     # Optional metadata to help backend format context
     activity_type: Optional[str] = None
     activity_id: Optional[str] = None
+    attempt_number: Optional[int] = 1
+    partial_correct: Optional[bool] = False
 
 
 class FeedbackResponse(BaseModel):

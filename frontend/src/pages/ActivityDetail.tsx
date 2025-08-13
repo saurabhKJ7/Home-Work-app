@@ -10,7 +10,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { getActivityById, submitAttempt, postJson, validateSubmission, selectHint, fetchMyAttempts } from "@/lib/api";
+import { getActivityById, submitAttempt, postJson, validateSubmission, fetchMyAttempts } from "@/lib/api";
 import { ValidationService } from "@/lib/validation";
 
 // Mock activity data with content
@@ -388,14 +388,16 @@ const ActivityDetail = () => {
       };
 
       try {
-        await submitAttempt(id, {
+        const attemptRes = await submitAttempt(id, {
           submission: answers,
           time_spent_seconds: timeSpent,
           is_correct: validationResult.is_correct,
           score_percentage: scoreData.percentage,
-          feedback: validationResult.feedback,
           confidence_score: validationResult.confidence_score || 0
         }, token);
+        if (attemptRes && typeof attemptRes.feedback === 'string' && attemptRes.feedback.trim()) {
+          result.feedback = attemptRes.feedback;
+        }
       } catch (error) {
         console.error('Error submitting attempt:', error);
       }
@@ -576,14 +578,16 @@ const ActivityDetail = () => {
 
     try {
       // Submit attempt with validation results to the database
-      await submitAttempt(id, {
+      const attemptRes = await submitAttempt(id, {
         submission: answers,
         time_spent_seconds: timeSpent,
         is_correct: validationResult.is_correct,
         score_percentage: scoreData.percentage,
-        feedback: validationResult.feedback,
         confidence_score: validationResult.confidence_score || 0
       }, token);
+      if (attemptRes && typeof attemptRes.feedback === 'string' && attemptRes.feedback.trim()) {
+        result.feedback = attemptRes.feedback;
+      }
       
               // Hints feature removed; keep placeholder empty
               try {

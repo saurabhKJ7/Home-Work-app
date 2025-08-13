@@ -1,7 +1,7 @@
 """
 Adaptive feedback generator for different response types
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import os
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
@@ -12,8 +12,10 @@ def generate_feedback(
     prompt: str,
     submission: Any,
     attempt_number: int = 1,
-    activity_type: str = None,
-    hints: List[str] | None = None
+    activity_type: Optional[str] = None,
+    hints: Optional[List[str]] = None,
+    partial_correct: bool = False,
+    validation_details: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Generate contextually appropriate feedback based on correctness and attempt number
@@ -49,7 +51,7 @@ def generate_feedback(
         else:
             feedback["tableEndText"] = "You did it! Persistence pays off!"
     
-    # Incorrect answer feedback
+    # Incorrect or partial answer feedback
     else:
         feedback["tableStartSound"] = "incorrect"
         feedback["tableEndSound"] = "incorrect"
@@ -75,6 +77,12 @@ def generate_feedback(
             except Exception:
                 # If anything goes wrong with hints selection, fall back silently
                 pass
+
+        # Partial correctness indicator
+        if partial_correct and not is_correct:
+            feedback["tableEndSticker"] = "partial"
+            # Nudge the text to reflect partial progress
+            feedback["tableEndText"] = f"You're on the right track. {feedback['tableEndText']}"
     
     # Add activity-specific feedback
     if activity_type:
@@ -134,6 +142,8 @@ def add_activity_specific_guidance(
     return base_feedback
 
 DEFAULT_GPT_MODEL = os.getenv("GPT_MODEL", "gpt-5-mini")
+# Smaller, cost-effective feedback model (distinct from GPT_MODEL)
+FEEDBACK_MODEL = os.getenv("FEEDBACK_MODEL", "gpt-4o-mini")
 
 def generate_llm_feedback(
     prompt: str,
@@ -155,32 +165,38 @@ def generate_llm_feedback(
     Returns:
         Detailed feedback text
     """
-    llm = ChatOpenAI(model=DEFAULT_GPT_MODEL, temperature=0.3)
+    llm = ChatOpenAI(model=FEEDBACK_MODEL, temperature=0.3)
     
     template = """
     You are an educational feedback generator for {activity_type} activities.
     
     Problem statement: {prompt}
-    
     Student submission: {submission}
+    Outcome: {correctness_status}
+    Attempt number: {attempt_number}
+    Partial correctness: {partial_status}
+    Error summary (if any): {error_summary}
     
-    The answer is {correctness_status}.
-    This is attempt number {attempt_number}.
-    
-    Generate appropriate educational feedback that:
-    1. Is encouraging and constructive
-    2. Provides guidance without revealing the complete solution
-    3. Is appropriate for the attempt number (more hints for later attempts)
-    4. Focuses on the specific activity type
-    
-    Feedback should be 1-2 sentences maximum.
+    Requirements:
+    - If correct: provide positive reinforcement, specifically acknowledge what was done right, and suggest progression/celebration cues.
+    - If incorrect: give constructive, non-revealing guidance; vary tone and specificity by attempt_number; include a redirective hint.
+    - If partial: recognize what is correct, clearly indicate remaining requirements, encourage and give a specific next step.
+    - Keep it concise (1–2 sentences). Avoid revealing the full solution.
     """
     
     correctness_status = "correct" if is_correct else "incorrect"
     
     prompt_template = PromptTemplate(
         template=template,
-        input_variables=["activity_type", "prompt", "submission", "correctness_status", "attempt_number"]
+        input_variables=[
+            "activity_type",
+            "prompt",
+            "submission",
+            "correctness_status",
+            "attempt_number",
+            "partial_status",
+            "error_summary",
+        ],
     )
     
     chain = LLMChain(llm=llm, prompt=prompt_template)
@@ -190,7 +206,9 @@ def generate_llm_feedback(
         prompt=prompt,
         submission=str(submission),
         correctness_status=correctness_status,
-        attempt_number=attempt_number
+        attempt_number=attempt_number,
+        partial_status="partial" if not is_correct else "none",
+        error_summary="",
     )
     
     return result.strip()

@@ -444,20 +444,37 @@ async def meta_validate_function(payload: MetaValidationRequest):
 @app.post("/feedback-answer", response_model=FeedbackResponse)
 async def feedback_answer(payload: FeedbackRequest):
     try:
-        from src.llm_chain import feedback_function
+        from src.feedback_generator import generate_feedback, generate_llm_feedback
         
-        # Minimal placeholder until submission→testcases mapping is formalized
-        test_cases: List[dict] = [{"submission": payload.submission}]
-        expected_outcomes: List[bool] = [True]  # Assume correct for testing
-        
-        result = feedback_function(
-            payload.user_query, payload.generated_function, test_cases, expected_outcomes
+        is_correct = False  # default; the caller should set this when known
+        # Try to infer correctness by executing the generated function locally is out-of-scope here
+        # so we rely on payload context. Extend contract later as needed.
+
+        # Generate deterministic scaffold + LLM short feedback
+        scaffold = generate_feedback(
+            is_correct=is_correct,
+            prompt=payload.user_query,
+            submission=payload.submission,
+            attempt_number=payload.attempt_number or 1,
+            activity_type=payload.activity_type,
+            hints=None,
+            partial_correct=bool(payload.partial_correct),
+            validation_details=None,
         )
-        
+        llm_text = generate_llm_feedback(
+            prompt=payload.user_query,
+            submission=payload.submission,
+            is_correct=is_correct,
+            attempt_number=payload.attempt_number or 1,
+            activity_type=payload.activity_type or "educational",
+        )
+
+        # Merge: prefer concise LLM text, keep scaffold signals
+        final_text = llm_text or scaffold.get("tableEndText", "Keep trying!")
         return FeedbackResponse(
-            is_correct=bool(result.get("is_correct", False)),
-            feedback=str(result.get("feedback", "")),
-            confidence_score=float(result.get("confidence_score", 0.0)),
+            is_correct=is_correct,
+            feedback=final_text,
+            confidence_score=0.7,
         )
     except Exception:
         logger.exception("/feedback-answer failed")
@@ -829,14 +846,13 @@ async def create_attempt(
             raise HTTPException(status_code=404, detail="Activity not found")
         
         # Create attempt with frontend-validated results
-        # Frontend should send these values after running the validation function
         attempt = DBAttempt(
             user_id=user.id,
             activity_id=activity_id,
             submission=payload.submission,
             is_correct=str(payload.is_correct).lower() if hasattr(payload, 'is_correct') else "false",
             score_percentage=str(getattr(payload, 'score_percentage', 0)),
-            feedback=getattr(payload, 'feedback', ''),
+            feedback='',
             confidence_score=str(getattr(payload, 'confidence_score', 0)),
             time_spent_seconds=str(payload.time_spent_seconds or 0),
         )
@@ -850,6 +866,51 @@ async def create_attempt(
             print(f"[attempts/create] Database error: {db_err}")
             raise HTTPException(status_code=500, detail="Failed to save attempt")
         
+        # Generate dynamic feedback text using smaller OpenAI model if no feedback provided
+        try:
+            if not attempt.feedback:
+                from src.feedback_generator import generate_feedback, generate_llm_feedback
+                is_correct_bool = (attempt.is_correct == "true")
+                # Determine attempt_number for this user/activity
+                try:
+                    prior_attempts = (
+                        db.query(DBAttempt)
+                        .filter(DBAttempt.user_id == user.id, DBAttempt.activity_id == activity_id)
+                        .count()
+                    )
+                except Exception:
+                    prior_attempts = 0
+                attempt_number_val = max(1, prior_attempts + 1)
+                # Partial correctness if non-zero but not full score
+                try:
+                    score_pct = float(getattr(payload, 'score_percentage', 0) or 0)
+                except Exception:
+                    score_pct = 0.0
+                partial = (not is_correct_bool) and (score_pct > 0)
+                base = generate_feedback(
+                    is_correct=is_correct_bool,
+                    prompt=activity.problem_statement,
+                    submission=payload.submission,
+                    attempt_number=attempt_number_val,
+                    activity_type=activity.type,
+                    hints=None,
+                    partial_correct=partial,
+                    validation_details=None,
+                )
+                llm_txt = generate_llm_feedback(
+                    prompt=activity.problem_statement,
+                    submission=payload.submission,
+                    is_correct=is_correct_bool,
+                    attempt_number=attempt_number_val,
+                    activity_type=activity.type,
+                )
+                attempt.feedback = llm_txt or base.get("tableEndText", "")
+                db.add(attempt)
+                db.commit()
+                db.refresh(attempt)
+        except Exception:
+            logger.exception("/attempts: dynamic feedback generation failed")
+
         return AttemptRead(
             id=attempt.id,
             user_id=attempt.user_id,
