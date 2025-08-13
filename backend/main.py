@@ -733,7 +733,8 @@ def list_activities(db: Session = Depends(get_db), user: DBUser = Depends(get_cu
                 correct_answers=a.correct_answers,
                 created_at=a.created_at,
                 is_completed=bool(activity_attempts.get(a.id) and activity_attempts[a.id].is_correct == "true"),
-                best_score=float(activity_attempts[a.id].score_percentage) if a.id in activity_attempts else 0.0
+                best_score=float(activity_attempts[a.id].score_percentage) if a.id in activity_attempts else 0.0,
+                attempts_count=sum(1 for att in student_attempts if att.activity_id == a.id)
             )
             for a in activities
         ]
@@ -751,6 +752,12 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
     
     logger.debug("/activities/%s fetched: title=%s", activity_id, a.title)
         
+    # Compute attempts_count for the current user
+    try:
+        attempts_count = db.query(DBAttempt).filter(DBAttempt.user_id == user.id, DBAttempt.activity_id == activity_id).count()
+    except Exception:
+        attempts_count = 0
+
     return ActivityRead(
         id=a.id,
         user_id=a.user_id,
@@ -763,6 +770,7 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
         validation_function=a.validation_function,
         correct_answers=a.correct_answers,
         created_at=a.created_at,
+        attempts_count=attempts_count
     )
 
 
@@ -898,6 +906,41 @@ async def create_attempt(
         raise
     except Exception as e:
         print(f"[attempts/create] Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/activities/{activity_id}/attempts", response_model=list[AttemptRead])
+def list_attempts_for_user(
+    activity_id: str,
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(require_role("student"))
+):
+    try:
+        rows = (
+            db.query(DBAttempt)
+            .filter(DBAttempt.user_id == user.id, DBAttempt.activity_id == activity_id)
+            .order_by(DBAttempt.created_at.desc())
+            .all()
+        )
+        return [
+            AttemptRead(
+                id=r.id,
+                user_id=r.user_id,
+                activity_id=r.activity_id,
+                submission=r.submission,
+                is_correct=(r.is_correct == "true"),
+                score_percentage=float(r.score_percentage),
+                feedback=r.feedback or "",
+                confidence_score=float(r.confidence_score),
+                time_spent_seconds=int(r.time_spent_seconds or 0),
+                created_at=r.created_at,
+            )
+            for r in rows
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("/activities/%s/attempts list failed", activity_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 

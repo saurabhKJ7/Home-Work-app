@@ -10,7 +10,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { getActivityById, submitAttempt, postJson, validateSubmission, selectHint } from "@/lib/api";
+import { getActivityById, submitAttempt, postJson, validateSubmission, selectHint, fetchMyAttempts } from "@/lib/api";
 import { ValidationService } from "@/lib/validation";
 
 // Mock activity data with content
@@ -93,6 +93,7 @@ const ActivityDetail = () => {
   const [submissionResult, setSubmissionResult] = useState<any>(null);
   const [startTime] = useState(new Date());
   const [isLoading, setIsLoading] = useState(true);
+  const [attempts, setAttempts] = useState<any[]>([]);
 
   // Verify that the user is a student, redirect if not
   useEffect(() => {
@@ -183,6 +184,14 @@ const ActivityDetail = () => {
         }
         
         setActivity(transformedActivity);
+
+        // Load user's attempts history for this activity
+        try {
+          const myAttempts = await fetchMyAttempts(id, token);
+          setAttempts(myAttempts);
+        } catch (e) {
+          console.warn('Failed to load attempts history:', e);
+        }
       } catch (error) {
         console.error('Failed to fetch activity:', error);
         toast({
@@ -393,6 +402,11 @@ const ActivityDetail = () => {
 
       setSubmissionResult(result);
       setIsSubmitted(true);
+      // Refresh attempts list
+      try {
+        const myAttempts = await fetchMyAttempts(id, token);
+        setAttempts(myAttempts);
+      } catch {}
       toast({
         title: 'Assignment Submitted!',
         description: `You scored ${result.score.percentage}% - ${result.feedback}`,
@@ -603,6 +617,11 @@ const ActivityDetail = () => {
       
       setSubmissionResult(result);
       setIsSubmitted(true);
+      // Refresh attempts list
+      try {
+        const myAttempts = await fetchMyAttempts(id, token);
+        setAttempts(myAttempts);
+      } catch {}
 
       toast({
         title: "Assignment Submitted!",
@@ -718,9 +737,14 @@ const ActivityDetail = () => {
                   {activity.worksheetLevel} • {activity.type}
                 </CardDescription>
               </div>
-              <Badge variant="outline" className={getDifficultyColor(activity.difficulty)}>
-                {activity.difficulty}
-              </Badge>
+              <div className="flex items-center gap-3">
+                <Badge variant="outline" className={getDifficultyColor(activity.difficulty)}>
+                  {activity.difficulty}
+                </Badge>
+                <Badge variant="secondary" title="Your total attempts on this activity">
+                  Attempts: {attempts?.length || activity.attempts_count || 0}
+                </Badge>
+              </div>
             </div>
             <p className="text-foreground/80 mt-4">{activity.problemStatement}</p>
           </CardHeader>
@@ -779,6 +803,31 @@ const ActivityDetail = () => {
                 <Button onClick={() => navigate('/student')}>
                   Back to Portal
                 </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Attempts History */}
+        {attempts && attempts.length > 0 && (
+          <Card className="shadow-card">
+            <CardHeader>
+              <CardTitle>Your Attempts</CardTitle>
+              <CardDescription>Most recent first</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 text-sm">
+                {attempts.map((a, idx) => (
+                  <div key={a.id || idx} className="flex items-center justify-between border rounded p-2">
+                    <div className="flex-1">
+                      <div className="font-medium">{new Date(a.created_at).toLocaleString()}</div>
+                      <div className="text-muted-foreground">Score: {Math.round(a.score_percentage)}% • {a.is_correct ? 'Correct' : 'Incorrect'}</div>
+                    </div>
+                    <div className="max-w-[60%] truncate text-xs text-muted-foreground" title={JSON.stringify(a.submission)}>
+                      Submission: {JSON.stringify(a.submission)}
+                    </div>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>

@@ -166,6 +166,13 @@ export async function submitAttempt(
   return postJson(`/activities/${activityId}/attempts`, attemptData, token);
 }
 
+export async function fetchMyAttempts(
+  activityId: string,
+  token: string
+): Promise<any[]> {
+  return getJson(`/activities/${activityId}/attempts`, token);
+}
+
 export async function selectHint(activityId: string, student_response: any, token: string, question_id?: string): Promise<{ hint: string; matched_index: number; score: number }>{
   return postJson(`/activities/${activityId}/select-hint`, { activity_id: activityId, question_id, student_response }, token);
 }
