@@ -103,6 +103,9 @@ const TeacherDashboard = () => {
   // Teacher-selected tests and responses for preview validation
   const [teacherSelectedTests, setTeacherSelectedTests] = useState<Record<string, any[]>>({});
   const [teacherResponses, setTeacherResponses] = useState<Record<string, string[]>>({});
+  // New per-question inputs for adding custom tests
+  const [newTestInputs, setNewTestInputs] = useState<Record<string, string>>({});
+  const [newTestExpected, setNewTestExpected] = useState<Record<string, string>>({});
   const { toast } = useToast();
   const { user, token } = useAuth();
   const navigate = useNavigate();
@@ -236,17 +239,65 @@ const TeacherDashboard = () => {
       const { name, params } = extractFunctionMeta(code);
       const fn: any = new Function(`${code}; return ${name};`)();
       const callWithInput = (input: any) => {
-        if (params.length > 1 && input && typeof input === 'object' && !Array.isArray(input)) {
-          const args = params.map(p => input[p]);
+        // Robust argument preparation similar to backend harness
+        try {
+          let args: any[] = [];
+          const isObj = input && typeof input === 'object' && !Array.isArray(input);
+          if (Array.isArray(params) && params.length > 1) {
+            if (isObj) {
+              const hasAll = params.every(p => Object.prototype.hasOwnProperty.call(input, p));
+              if (hasAll) {
+                args = params.map(p => (input as any)[p]);
+              } else {
+                const patterns: string[][] = [
+                  ['matrix1', 'matrix2'],
+                  ['matrixA', 'matrixB'],
+                  ['A', 'B'],
+                  ['a', 'b'],
+                ];
+                let matched = false;
+                for (const pat of patterns) {
+                  if (pat.length === params.length && pat.every(k => k in (input as any))) {
+                    args = pat.map(k => (input as any)[k]);
+                    matched = true;
+                    break;
+                  }
+                }
+                if (!matched) {
+                  args = params.map((_, i) => Object.values(input)[i]);
+                }
+              }
+            } else {
+              args = [input];
+            }
+          } else if (Array.isArray(params) && params.length === 1) {
+            if (isObj) {
+              const name = params[0];
+              args = [ (input as any)[name] !== undefined ? (input as any)[name] : Object.values(input)[0] ];
+            } else {
+              args = [input];
+            }
+          } else {
+            if (isObj) {
+              if ('matrix1' in (input as any) && 'matrix2' in (input as any)) args = [(input as any).matrix1, (input as any).matrix2];
+              else if ('A' in (input as any) && 'B' in (input as any)) args = [(input as any).A, (input as any).B];
+              else if ('a' in (input as any) && 'b' in (input as any)) args = [(input as any).a, (input as any).b];
+              else if ('matrixA' in (input as any) && 'matrixB' in (input as any)) args = [(input as any).matrixA, (input as any).matrixB];
+              else args = Object.values(input);
+            } else {
+              args = [input];
+            }
+          }
           return fn(...args);
+        } catch (e) {
+          throw e;
         }
-        return fn(input);
       };
       let passed = 0;
       let total = 0;
       const details: Array<{ input: any; expected: any; actual: any; passed: boolean }> = [];
-      // Only consider the first 5 tests on the frontend
-      for (const t of tests.slice(0, 5)) {
+      // Run all provided tests (including teacher-added)
+      for (const t of tests) {
         total++;
         try {
           const out = callWithInput(t.input);
@@ -286,10 +337,10 @@ const TeacherDashboard = () => {
       } };
     } catch (e) {
       console.warn('[Generate][Preview] Unable to evaluate tests for question:', e);
-      return { passed: 0, total: Math.min(5, Array.isArray(tests) ? tests.length : 0), details: [], metrics: {
+      return { passed: 0, total: (Array.isArray(tests) ? tests.length : 0), details: [], metrics: {
         accuracy_score: 0,
         false_positive_count: 0,
-        false_negative_count: Math.min(5, Array.isArray(tests) ? tests.length : 0),
+        false_negative_count: (Array.isArray(tests) ? tests.length : 0),
         edge_case_failures: [],
         confidence_level: 'low',
         improvement_suggestions: ['Fix runtime errors; tests could not be executed']
@@ -736,9 +787,9 @@ const TeacherDashboard = () => {
                           {previewActivity.content.math.map((item: any) => {
                             const perQuestionTests = previewActivity.perQuestionTests || {};
                             const perQuestionTestDetails = previewActivity.perQuestionTestDetails || {};
-                            const testsRecord: Record<string, { passed: number; total: number }> = {};
+      const testsRecord: Record<string, { passed: number; total: number }> = {};
                             const detailsRecord: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>> = {};
-                            if (perQuestionTests[item.id]) testsRecord[item.id] = perQuestionTests[item.id];
+                             if (perQuestionTests[item.id]) testsRecord[item.id] = perQuestionTests[item.id];
                             if (perQuestionTestDetails[item.id]) detailsRecord[item.id] = perQuestionTestDetails[item.id];
                             return (
                               <div key={item.id} className="space-y-2">
@@ -748,6 +799,8 @@ const TeacherDashboard = () => {
                                   isReadOnly
                                   showResults
                                   showTests
+                                  showStatus={false}
+                                  showAnswerInput={false}
                                   perQuestionTests={testsRecord}
                                   perQuestionTestDetails={detailsRecord}
                                 />
@@ -770,8 +823,55 @@ const TeacherDashboard = () => {
                                       />
                                     </div>
                                   ))}
+                                  {/* Add new test case UI */}
+                                  <div className="mt-3 p-2 rounded border bg-muted/20">
+                                    <div className="text-sm font-medium mb-2">Add test case</div>
+                                    <div className="flex items-center gap-2 py-1">
+                                      <div className="text-xs text-muted-foreground">Input (JSON):</div>
+                                      <Input
+                                        value={newTestInputs[item.id] ?? ''}
+                                        onChange={(e) => setNewTestInputs(prev => ({ ...prev, [item.id]: e.target.value }))}
+                                        placeholder='{"a":1}'
+                                      />
+                                    </div>
+                                    <div className="flex items-center gap-2 py-1">
+                                      <div className="text-xs text-muted-foreground">Expected:</div>
+                                      <Input
+                                        value={newTestExpected[item.id] ?? ''}
+                                        onChange={(e) => setNewTestExpected(prev => ({ ...prev, [item.id]: e.target.value }))}
+                                        placeholder="Type value (number/JSON)"
+                                      />
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => {
+                                          const inputText = (newTestInputs[item.id] ?? '').trim();
+                                          if (!inputText) { toast({ title: 'Enter input JSON', variant: 'destructive' }); return; }
+                                          let parsedInput: any;
+                                          try {
+                                            parsedInput = JSON.parse(inputText);
+                                          } catch {
+                                            // fallback: allow simple values via parseTeacherValue
+                                            parsedInput = parseTeacherValue(inputText);
+                                          }
+                                          const expectedText = (newTestExpected[item.id] ?? '');
+                                          setTeacherSelectedTests(prev => ({
+                                            ...prev,
+                                            [item.id]: [ ...(prev[item.id] || []), { input: parsedInput } ],
+                                          }));
+                                          setTeacherResponses(prev => ({
+                                            ...prev,
+                                            [item.id]: [ ...(prev[item.id] || []), expectedText ],
+                                          }));
+                                          setNewTestInputs(prev => ({ ...prev, [item.id]: '' }));
+                                          setNewTestExpected(prev => ({ ...prev, [item.id]: '' }));
+                                        }}
+                                      >
+                                        Add Test Case
+                                      </Button>
+                                    </div>
+                                  </div>
                                   <div className="pt-2">
-                                    <Button
+                                     <Button
                                       variant="outline"
                                       onClick={() => {
                                         const tests = (teacherSelectedTests[item.id] || []).map((t: any, i: number) => ({
@@ -850,6 +950,48 @@ const TeacherDashboard = () => {
                                       />
                                     </div>
                                   ))}
+                                  {/* Add new test case UI */}
+                                  <div className="mt-3 p-2 rounded border bg-muted/20">
+                                    <div className="text-sm font-medium mb-2">Add test case</div>
+                                    <div className="flex items-center gap-2 py-1">
+                                      <div className="text-xs text-muted-foreground">Input (JSON):</div>
+                                      <Input
+                                        value={newTestInputs[item.id] ?? ''}
+                                        onChange={(e) => setNewTestInputs(prev => ({ ...prev, [item.id]: e.target.value }))}
+                                        placeholder='{"answer":"your input shape"}'
+                                      />
+                                    </div>
+                                    <div className="flex items-center gap-2 py-1">
+                                      <div className="text-xs text-muted-foreground">Expected:</div>
+                                      <Input
+                                        value={newTestExpected[item.id] ?? ''}
+                                        onChange={(e) => setNewTestExpected(prev => ({ ...prev, [item.id]: e.target.value }))}
+                                        placeholder="Type value (number/JSON)"
+                                      />
+                                      <Button
+                                        variant="outline"
+                                        onClick={() => {
+                                          const inputText = (newTestInputs[item.id] ?? '').trim();
+                                          if (!inputText) { toast({ title: 'Enter input JSON', variant: 'destructive' }); return; }
+                                          let parsedInput: any;
+                                          try { parsedInput = JSON.parse(inputText); } catch { parsedInput = parseTeacherValue(inputText); }
+                                          const expectedText = (newTestExpected[item.id] ?? '');
+                                          setTeacherSelectedTests(prev => ({
+                                            ...prev,
+                                            [item.id]: [ ...(prev[item.id] || []), { input: parsedInput } ],
+                                          }));
+                                          setTeacherResponses(prev => ({
+                                            ...prev,
+                                            [item.id]: [ ...(prev[item.id] || []), expectedText ],
+                                          }));
+                                          setNewTestInputs(prev => ({ ...prev, [item.id]: '' }));
+                                          setNewTestExpected(prev => ({ ...prev, [item.id]: '' }));
+                                        }}
+                                      >
+                                        Add Test Case
+                                      </Button>
+                                    </div>
+                                  </div>
                                   <div className="pt-2">
                                     <Button
                                       variant="outline"

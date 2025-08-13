@@ -459,6 +459,8 @@ console.log(JSON.stringify({{ isValid: isValid, grid: gridResponse }}));
             "error": str(e)
         }
 
+
+from datetime import datetime
 def get_evaluate_function(rag_data, user_prompt, optimize_for_speed=False):
     """
     Create a chain to generate both a question and JavaScript function based on a user query.
@@ -471,6 +473,7 @@ def get_evaluate_function(rag_data, user_prompt, optimize_for_speed=False):
         user_prompt: User's question/prompt
         optimize_for_speed: If True, skips 100% pass validation for faster generation
     """
+    initial_time=datetime.now()
     llm = init_openai_model()
     rag_data_str = ""
     for item in rag_data:
@@ -572,14 +575,16 @@ Your output must strictly follow the JSON format described above.
     # OPTIMIZED: Auto-correct expectedOutput values with single batch execution
     try:
         logger.info("get_evaluate_function: auto-correcting expectedOutput values (optimized)")
-        
+        final_time=datetime.now()
+        logger.info("get_evaluate_function: time taken to auto-correct expectedOutput values: %s", final_time-initial_time)
         # Run all tests in one sandbox call to get actual results
         initial_summary = run_validation_tests_in_sandbox(result.code, result.validationTests)
         test_results = initial_summary.get("results", [])
         
         corrected_tests = []
         corrections_made = 0
-        
+        third_time=datetime.now()
+        logger.info("get_evaluate_function: time taken to run all tests in one sandbox call: %s", third_time-final_time)
         for i, test in enumerate(result.validationTests):
             if i < len(test_results) and test_results[i].get("actual") is not None:
                 actual_result = test_results[i]["actual"]

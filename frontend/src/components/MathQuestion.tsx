@@ -24,9 +24,11 @@ interface MathQuestionProps {
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
   hintsByQuestion?: Record<string, string>;
+  showStatus?: boolean; // controls green check / red cross icon
+  showAnswerInput?: boolean; // controls the Answer input visibility
 }
 
-const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: MathQuestionProps) => {
+const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {}, showStatus = true, showAnswerInput = true }: MathQuestionProps) => {
   // Keep text inputs locally; parse to rich values on submit
   const initialText: { [key: string]: string } = Object.fromEntries(Object.entries(userAnswers).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
   const [answersText, setAnswersText] = useState<{ [key: string]: string }>(initialText);
@@ -97,7 +99,7 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
                   {index + 1}
                 </span>
                 <span>Math Problem</span>
-                {showResults && typeof problems[index].answer !== 'undefined' && (
+                {showStatus && showResults && typeof problems[index].answer !== 'undefined' && (
                   <div className="ml-auto">
                     {isCorrect(problem.id) ? (
                       <CheckCircle className="w-5 h-5 text-success" />
@@ -110,22 +112,23 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-lg font-medium">{problem.question}</p>
-              <div className="flex items-center space-x-3">
-                <span className="text-muted-foreground">Answer:</span>
-                <Input
-                  // type="number"
-                  placeholder="Your answer"
-                  value={answersText[problem.id] || ''}
-                  onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
-                  disabled={isReadOnly}
-                  className={showResults && typeof problem.answer !== 'undefined' ? (
-                    isCorrect(problem.id)
-                      ? "border-success bg-success/5"
-                      : "border-destructive bg-destructive/5"
-                  ) : ""}
-                />
-
-              </div>
+              {showAnswerInput && (
+                <div className="flex items-center space-x-3">
+                  <span className="text-muted-foreground">Answer:</span>
+                  <Input
+                    // type="number"
+                    placeholder="Your answer"
+                    value={answersText[problem.id] || ''}
+                    onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
+                    disabled={isReadOnly}
+                    className={showResults && typeof problem.answer !== 'undefined' ? (
+                      isCorrect(problem.id)
+                        ? "border-success bg-success/5"
+                        : "border-destructive bg-destructive/5"
+                    ) : ""}
+                  />
+                </div>
+              )}
               {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">
                   Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? Math.min(5, problem.validation_tests?.length || 5)}

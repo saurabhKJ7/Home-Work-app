@@ -833,6 +833,7 @@ const ActivityDetail = () => {
                 isReadOnly={isSubmitted}
                 showResults={isSubmitted}
                 showTests={false}
+                showStatus={false}
                 userAnswers={submissionResult?.userAnswers}
                 perQuestionTests={submissionResult?.perQuestionTests}
                 perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
