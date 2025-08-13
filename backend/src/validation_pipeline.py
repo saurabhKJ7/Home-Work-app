@@ -133,7 +133,6 @@ def validate_student_submission(
         submission,
         attempt_number,
         activity_type,
-        # Pass model-provided feedback hints when available
         hints=None,
     )
     

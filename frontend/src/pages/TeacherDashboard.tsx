@@ -64,8 +64,7 @@ const createDynamicContent = (questions: any[], activityType: string) => {
       solution_grid: q.solution_grid,
       validation_function: q.validation_function,
       grid_size: q.grid_size,
-      difficulty: q.difficulty,
-      feedback_hints: q.feedback_hints || []
+      difficulty: q.difficulty
     }));
   } else if (activityType === 'Mathematical') {
     content.math = questions.map((q: any, index: number) => ({
@@ -76,8 +75,7 @@ const createDynamicContent = (questions: any[], activityType: string) => {
       question_id: q.question_id,
       input_example: q.input_example,
       expected_output: q.expected_output,
-      validation_tests: q.validation_tests || [],
-      feedback_hints: q.feedback_hints || []
+        validation_tests: q.validation_tests || []
     }));
   } else if (activityType === 'Logical') {
     content.logic = questions.map((q: any, index: number) => ({
@@ -89,8 +87,7 @@ const createDynamicContent = (questions: any[], activityType: string) => {
       question_id: q.question_id,
       input_example: q.input_example,
       expected_output: q.expected_output,
-      validation_tests: q.validation_tests || [],
-      feedback_hints: q.feedback_hints || []
+        validation_tests: q.validation_tests || []
     }));
   }
   
@@ -399,7 +396,7 @@ const TeacherDashboard = () => {
           responses[item.id] = sample.map(() => '');
         }
       } else if (formData.type === 'Grid-based' && previewContent.grid) {
-        // For grid-based, we don't need random tests - the validation is the grid itself
+        // For grid-based, hints removed; only structure preview
         for (const item of previewContent.grid) {
           selected[item.id] = [];
           responses[item.id] = [];

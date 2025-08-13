@@ -585,35 +585,10 @@ const ActivityDetail = () => {
         confidence_score: validationResult.confidence_score || 0
       }, token);
       
-      // If not fully correct, fetch a hint per incorrect question
-      try {
-        if (!validationResult.is_correct) {
-          const hintsByQuestion: Record<string, string> = {};
-          if (typeof activity.validation_function === 'string') {
-            // Multiple-questions case: validation_function may be JSON map
-            try {
-              const vfMap = JSON.parse(activity.validation_function);
-              for (const qid of Object.keys(answers || {})) {
-                // Only fetch hint if wrong
-                const qRes = (validationResult.metadata?.question_results || {})[qid];
-                if (!qRes || qRes.is_correct) continue;
-                const res = await selectHint(id, (answers as any)[qid], token, qid);
-                hintsByQuestion[qid] = res.hint;
-              }
-            } catch {
-              // Single question fallback
-              if (!validationResult.is_correct) {
-                const firstKey = Object.keys(answers || {})[0];
-                const res = await selectHint(id, firstKey ? (answers as any)[firstKey] : answers, token);
-                hintsByQuestion['1'] = res.hint;
-              }
-            }
-          }
-          result.hintsByQuestion = hintsByQuestion;
-        }
-      } catch (e) {
-        console.warn('Hint selection failed:', e);
-      }
+              // Hints feature removed; keep placeholder empty
+              try {
+                result.hintsByQuestion = {};
+              } catch {}
       
       setSubmissionResult(result);
       setIsSubmitted(true);

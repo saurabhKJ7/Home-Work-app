@@ -248,8 +248,7 @@ async def generate_code(
                         "validation_function": result.code,
                         "code": result.code,
                         "grid_size": result.gridSize,
-                        "difficulty": result.difficulty,
-                        "feedback_hints": result.feedbackHints
+                        "difficulty": result.difficulty
                     }
                 else:
                     question_data = {
@@ -259,8 +258,7 @@ async def generate_code(
                         "type": payload.type,
                         "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
                         "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                        "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
-                        "feedback_hints": result.feedbackHints if hasattr(result, 'feedbackHints') else []
+                        "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
                     }
                 
                 logger.info("/generate-code: completed question %d", question_index + 1)
@@ -285,8 +283,7 @@ async def generate_code(
                     "validation_function": result.code,
                     "code": result.code,
                     "grid_size": result.gridSize,
-                    "difficulty": result.difficulty,
-                    "feedback_hints": result.feedbackHints
+                    "difficulty": result.difficulty
                 })
             else:
                 result = get_evaluate_function(rag_data, payload.user_query, optimize_for_speed=payload.optimize_for_speed)
@@ -298,8 +295,7 @@ async def generate_code(
                     "type": payload.type,
                     "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
                     "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                    "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
-                    "feedback_hints": result.feedbackHints if hasattr(result, 'feedbackHints') else []
+                    "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
                 })
         else:
             # For multiple questions, use parallel processing
@@ -406,22 +402,6 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
                     payload.attempt_number
                 )
             
-            # Incorporate model-provided hints if available on the activity
-            if hasattr(activity, "feedback_hints") and activity.feedback_hints and not result.is_correct:
-                try:
-                    from src.feedback_generator import generate_feedback
-                    hints = list(activity.feedback_hints or [])
-                    enriched = generate_feedback(
-                        is_correct=False,
-                        prompt=activity.problem_statement,
-                        submission=payload.student_response,
-                        attempt_number=payload.attempt_number,
-                        activity_type=activity.type,
-                        hints=hints,
-                    )
-                    result.feedback = enriched.get("tableEndText", result.feedback)
-                except Exception:
-                    logger.exception("/validate-function: failed to augment feedback with hints")
             return result
             
         except Exception:
@@ -650,7 +630,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
             input_example=payload.questions[0].input_example if payload.questions else None,
             expected_output=payload.questions[0].expected_output if payload.questions else None,
             validation_tests=payload.questions[0].validation_tests if payload.questions else None,
-            feedback_hints=payload.questions[0].feedback_hints if payload.questions and hasattr(payload.questions[0], 'feedback_hints') else None
+            
         )
         db.add(activity)
         db.flush()
@@ -801,32 +781,13 @@ def select_hint(
         if not activity:
             raise HTTPException(status_code=404, detail="Activity not found")
 
-        # Prefer question-specific hints from UI config if available
-        hints = []
-        try:
-            ui_cfg = activity.ui_config or {}
-            qid = getattr(payload, "question_id", None)
-            if qid and isinstance(ui_cfg, dict):
-                for group_key in ("math", "logic"):
-                    items = ui_cfg.get(group_key) or []
-                    for item in items:
-                        if str(item.get("question_id")) == str(qid):
-                            hints = list(item.get("feedback_hints") or [])
-                            break
-                    if hints:
-                        break
-        except Exception:
-            hints = []
-
-        # Fallback to activity-level hints
-        if not hints:
-            try:
-                hints = list(activity.feedback_hints or [])
-            except Exception:
-                hints = []
-
-        if not hints:
-            return HintResponse(hint="Wrong answer. Try again.", matched_index=-1, score=0.0)
+        # Hints removed: return a generic rotating message based on attempt number
+        generic_hints = [
+            "Not quite right. Take another look and try again.",
+            "Still not correct. Think about the problem carefully.",
+            "Consider a different approach.",
+            "Review the requirements and try once more.",
+        ]
 
         # Derive attempt count for this student and activity to rotate hints
         try:
@@ -838,14 +799,14 @@ def select_hint(
         except Exception:
             attempts_count = 0
         attempt_number = attempts_count + 1
-        idx = (attempt_number - 1) % len(hints)
-        selected = str(hints[idx]).strip() or "Keep trying. Break the problem into smaller steps."
+        idx = (attempt_number - 1) % len(generic_hints)
+        selected = generic_hints[idx]
         logger.info(
             "/activities/%s/select-hint: attempt=%d idx=%d/%d",
             activity_id,
             attempt_number,
             idx,
-            len(hints),
+            len(generic_hints),
         )
         return HintResponse(hint=selected, matched_index=idx, score=1.0)
     except HTTPException:

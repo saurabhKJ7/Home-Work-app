@@ -56,8 +56,6 @@ class QuestionResponse(BaseModel):
     grid_size: Optional[Dict[str, int]] = None
     difficulty: Optional[str] = None
     
-    # Common fields
-    feedback_hints: Optional[List[str]] = None
 
 
 class GenerateCodeResponse(BaseModel):
@@ -101,7 +99,7 @@ class ActivityBase(BaseModel):
     validation_tests: Optional[List[TestCase]] = None
     test_cases_count: Optional[int] = 10
     output_format: Optional[str] = None
-    feedback_hints: Optional[List[str]] = None
+    
 
 class HintRequest(BaseModel):
     activity_id: str
