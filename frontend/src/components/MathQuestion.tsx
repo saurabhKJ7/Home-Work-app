@@ -7,7 +7,8 @@ import { CheckCircle, XCircle } from "lucide-react";
 interface MathProblem {
   id: string;
   question: string;
-  answer: number;
+  // Allow any shaped answer (number, string, array/matrix, object)
+  answer?: any;
   input_example?: any;
   expected_output?: any;
   validation_tests?: Array<{ input: any; expectedOutput: any }>;
@@ -15,32 +16,74 @@ interface MathProblem {
 
 interface MathQuestionProps {
   problems: MathProblem[];
-  onSubmit: (answers: { [key: string]: number }) => void;
+  onSubmit: (answers: { [key: string]: any }) => void;
   isReadOnly?: boolean;
   showResults?: boolean;
   showTests?: boolean;
-  userAnswers?: { [key: string]: number };
+  userAnswers?: { [key: string]: any };
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
   hintsByQuestion?: Record<string, string>;
 }
 
 const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: MathQuestionProps) => {
-  const [answers, setAnswers] = useState<{ [key: string]: number }>(userAnswers);
+  // Keep text inputs locally; parse to rich values on submit
+  const initialText: { [key: string]: string } = Object.fromEntries(Object.entries(userAnswers).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
+  const [answersText, setAnswersText] = useState<{ [key: string]: string }>(initialText);
+
+  const parseUserInput = (value: string): any => {
+    const trimmed = (value ?? '').trim();
+    if (trimmed === '') return '';
+    // Try JSON first for arrays/objects/numbers/strings
+    try {
+      // Allow bare numbers without quotes as well
+      if (trimmed.startsWith('[') || trimmed.startsWith('{') || /^-?\d+(\.\d+)?$/.test(trimmed) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
+        return JSON.parse(trimmed);
+      }
+    } catch {}
+    // Fallback: try number
+    const n = Number(trimmed);
+    if (!Number.isNaN(n)) return n;
+    // As-is string
+    return trimmed;
+  };
+
+  const deepEqual = (a: any, b: any): boolean => {
+    if (typeof a === 'number' && typeof b === 'number') {
+      return Math.abs(a - b) < 1e-6;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (!deepEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+      const aKeys = Object.keys(a);
+      const bKeys = Object.keys(b);
+      if (aKeys.length !== bKeys.length) return false;
+      for (const k of aKeys) {
+        if (!deepEqual(a[k], b[k])) return false;
+      }
+      return true;
+    }
+    return String(a) === String(b);
+  };
 
   const handleAnswerChange = (problemId: string, value: string) => {
     if (isReadOnly) return;
-    
-    const numValue = value === '' ? 0 : parseFloat(value) || 0;
-    setAnswers(prev => ({
+    setAnswersText(prev => ({
       ...prev,
-      [problemId]: numValue
+      [problemId]: value
     }));
   };
 
   const isCorrect = (problemId: string) => {
     const problem = problems.find(p => p.id === problemId);
-    return problem && answers[problemId] === problem.answer;
+    if (!problem || typeof problem.answer === 'undefined') return undefined;
+    const parsed = parseUserInput(answersText[problemId] ?? '');
+    return deepEqual(parsed, problem.answer);
   };
 
   return (
@@ -54,7 +97,7 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
                   {index + 1}
                 </span>
                 <span>Math Problem</span>
-                {showResults && (
+                {showResults && typeof problems[index].answer !== 'undefined' && (
                   <div className="ml-auto">
                     {isCorrect(problem.id) ? (
                       <CheckCircle className="w-5 h-5 text-success" />
@@ -72,12 +115,12 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
                 <Input
                   // type="number"
                   placeholder="Your answer"
-                  value={answers[problem.id] || ''}
+                  value={answersText[problem.id] || ''}
                   onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
                   disabled={isReadOnly}
-                  className={showResults ? (
-                    isCorrect(problem.id) 
-                      ? "border-success bg-success/5" 
+                  className={showResults && typeof problem.answer !== 'undefined' ? (
+                    isCorrect(problem.id)
+                      ? "border-success bg-success/5"
                       : "border-destructive bg-destructive/5"
                   ) : ""}
                 />
@@ -112,7 +155,17 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
       
       {!isReadOnly && (
         <div className="flex justify-center">
-          <Button variant="hero" onClick={() => onSubmit(answers)} className="px-8">
+          <Button
+            variant="hero"
+            onClick={() => {
+              const parsedAnswers: { [key: string]: any } = {};
+              for (const [k, v] of Object.entries(answersText)) {
+                parsedAnswers[k] = parseUserInput(v);
+              }
+              onSubmit(parsedAnswers);
+            }}
+            className="px-8"
+          >
             Submit Answers
           </Button>
         </div>
