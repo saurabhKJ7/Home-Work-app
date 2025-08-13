@@ -16,6 +16,8 @@ import { PlusCircle, Eye, Wand2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { postJson, fetchActivities, createActivity, deleteActivity } from "@/lib/api";
+import useSpeechToText from "@/hooks/use-speech-to-text";
+import { Mic, Square } from "lucide-react";
 
 // Mock data for activities
 const mockActivities: Activity[] = [
@@ -167,6 +169,14 @@ const TeacherDashboard = () => {
     difficulty: '',
     numQuestions: 1
   });
+
+  // Voice input for problem statement (browser SpeechRecognition)
+  const speech = useSpeechToText({ language: 'en-US', interimResults: true, continuous: false });
+  useEffect(() => {
+    if (speech.transcript && !isGenerating) {
+      setFormData(prev => ({ ...prev, problemStatement: (prev.problemStatement ? prev.problemStatement + ' ' : '') + speech.transcript }));
+    }
+  }, [speech.transcript, isGenerating]);
 
   const handleInputChange = (field: string, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -570,6 +580,32 @@ const TeacherDashboard = () => {
                       onChange={(e) => handleInputChange('problemStatement', e.target.value)}
                       rows={4}
                     />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant={speech.isRecording ? 'destructive' : 'outline'}
+                        onClick={() => {
+                          if (!speech.isSupported) {
+                            toast({ title: 'Voice input not supported', description: 'Your browser does not support speech recognition. Try Chrome, or we can add server-side transcription.', variant: 'destructive' });
+                            return;
+                          }
+                          if (speech.isRecording) speech.stop(); else { speech.reset(); speech.start(); }
+                        }}
+                      >
+                        {speech.isRecording ? (<><Square className="w-4 h-4 mr-2" /> Stop</>) : (<><Mic className="w-4 h-4 mr-2" /> Speak prompt</>)}
+                      </Button>
+                      <div className="text-xs text-muted-foreground">
+                        {speech.isSupported ? `Language: ${speech.language}` : 'SpeechRecognition unavailable'}
+                      </div>
+                    </div>
+                    {(speech.interimTranscript || speech.transcript) && (
+                      <div className="text-xs p-2 bg-muted/30 rounded border">
+                        <div className="font-medium mb-1">Live transcript</div>
+                        <div className="text-muted-foreground">
+                          {speech.interimTranscript || speech.transcript}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-3 gap-4">
