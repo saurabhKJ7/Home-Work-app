@@ -904,6 +904,79 @@ async def create_attempt(
                     attempt_number=attempt_number_val,
                     activity_type=activity.type,
                 )
+                # Build per-question feedback if multi-question submission
+                per_question_feedback: dict[str, str] | None = None
+                try:
+                    import json
+                    per_question_feedback = {}
+                    # Detect multi-question format: validation_function stored as JSON mapping
+                    vf_map = None
+                    try:
+                        vf_map = json.loads(activity.validation_function or "") if activity.validation_function else None
+                    except Exception:
+                        vf_map = None
+                    # Only attempt per-question feedback for dict-like submissions
+                    if isinstance(payload.submission, dict) and (isinstance(vf_map, dict) or (activity.ui_config and (activity.ui_config.get("math") or activity.ui_config.get("logic")))):
+                        # Helper to find question metadata by id from ui_config
+                        def get_question_meta(qid: str):
+                            try:
+                                if activity.ui_config and isinstance(activity.ui_config, dict):
+                                    for key in ("math", "logic"):
+                                        qlist = activity.ui_config.get(key) or []
+                                        for q in qlist:
+                                            if str(q.get("id")) == str(qid):
+                                                return q
+                            except Exception:
+                                return None
+                            return None
+                        # Determine per-question correctness from payload.question_results if provided
+                        question_results = getattr(payload, "question_results", None) or {}
+                        for qid, user_ans in payload.submission.items():
+                            try:
+                                # correctness precedence: payload.question_results -> compare with ui_config answer -> fallback to overall
+                                q_correct = None
+                                if isinstance(question_results, dict) and str(qid) in question_results and isinstance(question_results[str(qid)], dict):
+                                    # Accept various shapes { is_correct: bool }
+                                    q_correct = bool(question_results[str(qid)].get("is_correct", False))
+                                if q_correct is None:
+                                    qmeta = get_question_meta(str(qid))
+                                    if qmeta is not None and ("answer" in qmeta):
+                                        expected = qmeta.get("answer")
+                                        q_correct = (expected == user_ans)
+                                if q_correct is None:
+                                    q_correct = is_correct_bool
+                                q_prompt = None
+                                qmeta2 = get_question_meta(str(qid))
+                                if qmeta2 is not None:
+                                    q_prompt = qmeta2.get("question") or activity.problem_statement
+                                else:
+                                    q_prompt = activity.problem_statement
+                                q_base = generate_feedback(
+                                    is_correct=bool(q_correct),
+                                    prompt=str(q_prompt),
+                                    submission=user_ans,
+                                    attempt_number=attempt_number_val,
+                                    activity_type=activity.type,
+                                    hints=None,
+                                    partial_correct=partial,
+                                    validation_details=None,
+                                )
+                                q_llm = generate_llm_feedback(
+                                    prompt=str(q_prompt),
+                                    submission=user_ans,
+                                    is_correct=bool(q_correct),
+                                    attempt_number=attempt_number_val,
+                                    activity_type=activity.type,
+                                )
+                                per_question_feedback[str(qid)] = (q_llm or q_base.get("tableEndText", "")).strip()
+                            except Exception:
+                                # Skip per-question errors silently
+                                continue
+                        if not per_question_feedback:
+                            per_question_feedback = None
+                except Exception:
+                    per_question_feedback = None
+
                 attempt.feedback = llm_txt or base.get("tableEndText", "")
                 db.add(attempt)
                 db.commit()
@@ -922,6 +995,7 @@ async def create_attempt(
             confidence_score=float(attempt.confidence_score),
             time_spent_seconds=int(attempt.time_spent_seconds or 0),
             created_at=attempt.created_at,
+            per_question_feedback=per_question_feedback if 'per_question_feedback' in locals() else None,
         )
         
     except HTTPException:

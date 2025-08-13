@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { FC } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,9 +28,10 @@ interface LogicQuestionProps {
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
   hintsByQuestion?: Record<string, string>;
+  perQuestionFeedback?: Record<string, string>;
 }
 
-const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: LogicQuestionProps) => {
+const LogicQuestion: FC<LogicQuestionProps> = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {}, perQuestionFeedback = {} }) => {
   const [answers, setAnswers] = useState<{ [key: string]: string | number }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string | number) => {
@@ -120,6 +122,12 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
               {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">
                   Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? Math.min(5, problem.validation_tests?.length || 5)}
+                </div>
+              )}
+              {showResults && perQuestionFeedback[problem.id] && (
+                <div className="mt-2 text-sm border rounded-md p-2 bg-muted/30">
+                  <div className="text-xs font-medium mb-1">Feedback</div>
+                  <div>{perQuestionFeedback[problem.id]}</div>
                 </div>
               )}
               {showResults && hintsByQuestion[problem.id] && (

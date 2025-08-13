@@ -138,6 +138,8 @@ class AttemptCreate(BaseModel):
     score_percentage: Optional[float] = None
     feedback: Optional[str] = None
     confidence_score: Optional[float] = None
+    # Optional per-question results from frontend validation for multi-question activities
+    question_results: Optional[Dict[str, Any]] = None
 
 
 class AttemptRead(BaseModel):
@@ -151,6 +153,8 @@ class AttemptRead(BaseModel):
     confidence_score: float
     time_spent_seconds: Optional[int] = None
     created_at: datetime
+    # Per-question feedback generated on the server, if available
+    per_question_feedback: Optional[Dict[str, str]] = None
 
     class Config:
         from_attributes = True

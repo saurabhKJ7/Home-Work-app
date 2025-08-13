@@ -572,7 +572,8 @@ const ActivityDetail = () => {
       totalTests: validationResult?.metadata?.total_tests,
       perQuestionTests,
       perQuestionTestDetails,
-      hintsByQuestion: {}
+      hintsByQuestion: {},
+      perQuestionFeedback: {}
     };
     console.log('[Submit] Summary:', result);
 
@@ -583,10 +584,14 @@ const ActivityDetail = () => {
         time_spent_seconds: timeSpent,
         is_correct: validationResult.is_correct,
         score_percentage: scoreData.percentage,
-        confidence_score: validationResult.confidence_score || 0
+        confidence_score: validationResult.confidence_score || 0,
+        question_results: validationResult?.metadata?.question_results
       }, token);
       if (attemptRes && typeof attemptRes.feedback === 'string' && attemptRes.feedback.trim()) {
         result.feedback = attemptRes.feedback;
+      }
+      if (attemptRes && attemptRes.per_question_feedback && typeof attemptRes.per_question_feedback === 'object') {
+        try { result.perQuestionFeedback = attemptRes.per_question_feedback; } catch {}
       }
       
               // Hints feature removed; keep placeholder empty
@@ -827,7 +832,7 @@ const ActivityDetail = () => {
             )}
 
             {activity.type === 'Mathematical' && (
-              <MathQuestion
+            <MathQuestion
                 problems={activity.content.math}
                 onSubmit={handleSubmit}
                 isReadOnly={isSubmitted}
@@ -837,12 +842,13 @@ const ActivityDetail = () => {
                 userAnswers={submissionResult?.userAnswers}
                 perQuestionTests={submissionResult?.perQuestionTests}
                 perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
-                hintsByQuestion={submissionResult?.hintsByQuestion}
+              hintsByQuestion={submissionResult?.hintsByQuestion}
+              perQuestionFeedback={submissionResult?.perQuestionFeedback}
               />
             )}
 
             {activity.type === 'Logical' && (
-              <LogicQuestion
+            <LogicQuestion
                 problems={activity.content.logic}
                 onSubmit={handleSubmit}
                 isReadOnly={isSubmitted}
@@ -851,7 +857,8 @@ const ActivityDetail = () => {
                 userAnswers={submissionResult?.userAnswers}
                 perQuestionTests={submissionResult?.perQuestionTests}
                 perQuestionTestDetails={submissionResult?.perQuestionTestDetails}
-                hintsByQuestion={submissionResult?.hintsByQuestion}
+              hintsByQuestion={submissionResult?.hintsByQuestion}
+              perQuestionFeedback={submissionResult?.perQuestionFeedback}
               />
             )}
           </CardContent>

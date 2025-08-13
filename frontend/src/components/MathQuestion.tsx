@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { FC } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,9 +27,10 @@ interface MathQuestionProps {
   hintsByQuestion?: Record<string, string>;
   showStatus?: boolean; // controls green check / red cross icon
   showAnswerInput?: boolean; // controls the Answer input visibility
+  perQuestionFeedback?: Record<string, string>;
 }
 
-const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {}, showStatus = true, showAnswerInput = true }: MathQuestionProps) => {
+const MathQuestion: FC<MathQuestionProps> = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {}, showStatus = true, showAnswerInput = true, perQuestionFeedback = {} }) => {
   // Keep text inputs locally; parse to rich values on submit
   const initialText: { [key: string]: string } = Object.fromEntries(Object.entries(userAnswers).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
   const [answersText, setAnswersText] = useState<{ [key: string]: string }>(initialText);
@@ -132,6 +134,12 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
               {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">
                   Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? Math.min(5, problem.validation_tests?.length || 5)}
+                </div>
+              )}
+              {showResults && perQuestionFeedback[problem.id] && (
+                <div className="mt-2 text-sm border rounded-md p-2 bg-muted/30">
+                  <div className="text-xs font-medium mb-1">Feedback</div>
+                  <div>{perQuestionFeedback[problem.id]}</div>
                 </div>
               )}
               {showResults && hintsByQuestion[problem.id] && (
