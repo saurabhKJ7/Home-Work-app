@@ -808,30 +808,7 @@ const ActivityDetail = () => {
           </Card>
         )}
 
-        {/* Attempts History */}
-        {attempts && attempts.length > 0 && (
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle>Your Attempts</CardTitle>
-              <CardDescription>Most recent first</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 text-sm">
-                {attempts.map((a, idx) => (
-                  <div key={a.id || idx} className="flex items-center justify-between border rounded p-2">
-                    <div className="flex-1">
-                      <div className="font-medium">{new Date(a.created_at).toLocaleString()}</div>
-                      <div className="text-muted-foreground">Score: {Math.round(a.score_percentage)}% • {a.is_correct ? 'Correct' : 'Incorrect'}</div>
-                    </div>
-                    <div className="max-w-[60%] truncate text-xs text-muted-foreground" title={JSON.stringify(a.submission)}>
-                      Submission: {JSON.stringify(a.submission)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* Attempts history intentionally hidden; showing only count in header */}
 
         {/* Activity Content */}
         <Card className="shadow-card">
