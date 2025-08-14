@@ -27,9 +27,13 @@ interface LogicQuestionProps {
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
   hintsByQuestion?: Record<string, string>;
+  // UI controls used by teacher preview
+  hideAnswerInput?: boolean;
+  hideStatusIcons?: boolean;
+  questionNumberOverride?: number;
 }
 
-const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: LogicQuestionProps) => {
+const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {}, hideAnswerInput = false, hideStatusIcons = false, questionNumberOverride }: LogicQuestionProps) => {
   const [answers, setAnswers] = useState<{ [key: string]: any }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string | number) => {
@@ -58,8 +62,8 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
                 <div className="w-8 h-8 bg-primary/10 text-primary rounded-full flex items-center justify-center">
                   <Brain className="w-4 h-4" />
                 </div>
-                <span>Logic Problem {index + 1}</span>
-                {showResults && (
+                <span>Logic Problem {questionNumberOverride ?? (index + 1)}</span>
+                {showResults && !hideStatusIcons && (
                   <div className="ml-auto">
                     {isCorrect(problem.id) ? (
                       <CheckCircle className="w-5 h-5 text-success" />
@@ -102,22 +106,23 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
                   </RadioGroup>
                 </div>
               ) : (
-                <div className="flex items-center space-x-3">
-                  <span className="text-muted-foreground">Answer:</span>
-                  <Input
-                    type="text"
-                    placeholder="Your answer"
-                    value={answers[problem.id] || ''}
-                    onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
-                    disabled={isReadOnly}
-                    className={showResults ? (
-                      isCorrect(problem.id) 
-                        ? "border-success bg-success/5" 
-                        : "border-destructive bg-destructive/5"
-                    ) : ""}
-                  />
-
-                </div>
+                !hideAnswerInput && (
+                  <div className="flex items-center space-x-3">
+                    <span className="text-muted-foreground">Answer:</span>
+                    <Input
+                      type="text"
+                      placeholder="Your answer"
+                      value={answers[problem.id] || ''}
+                      onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
+                      disabled={isReadOnly}
+                      className={showResults ? (
+                        isCorrect(problem.id) 
+                          ? "border-success bg-success/5" 
+                          : "border-destructive bg-destructive/5"
+                      ) : ""}
+                    />
+                  </div>
+                )
               )}
               {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">

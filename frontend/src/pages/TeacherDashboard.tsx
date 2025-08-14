@@ -741,7 +741,7 @@ const TeacherDashboard = () => {
 
                       {previewActivity.type === 'Mathematical' && Array.isArray(previewActivity.content.math) && (
                         <div className="space-y-4">
-                          {previewActivity.content.math.map((item: any) => {
+                          {previewActivity.content.math.map((item: any, idx: number) => {
                             const perQuestionTests = previewActivity.perQuestionTests || {};
                             const perQuestionTestDetails = previewActivity.perQuestionTestDetails || {};
                             const testsRecord: Record<string, { passed: number; total: number }> = {};
@@ -754,10 +754,13 @@ const TeacherDashboard = () => {
                                   problems={[item]}
                                   onSubmit={() => {}}
                                   isReadOnly
-                                  showResults
-                                  showTests
+                                  showResults={false}
+                                  showTests={false}
                                   perQuestionTests={testsRecord}
                                   perQuestionTestDetails={detailsRecord}
+                                  hideAnswerInput
+                                  hideStatusIcons
+                                  questionNumberOverride={idx + 1}
                                 />
                                 <div className="border rounded-md p-3">
                                   <div className="font-medium mb-2">Teacher Test Inputs (Question {item.id})</div>
@@ -819,7 +822,7 @@ const TeacherDashboard = () => {
 
                       {previewActivity.type === 'Logical' && Array.isArray(previewActivity.content.logic) && (
                         <div className="space-y-4">
-                          {previewActivity.content.logic.map((item: any) => {
+                          {previewActivity.content.logic.map((item: any, idx: number) => {
                             const perQuestionTests = previewActivity.perQuestionTests || {};
                             const perQuestionTestDetails = previewActivity.perQuestionTestDetails || {};
                             const testsRecord: Record<string, { passed: number; total: number }> = {};
@@ -832,10 +835,13 @@ const TeacherDashboard = () => {
                                   problems={[item]}
                                   onSubmit={() => {}}
                                   isReadOnly
-                                  showResults
-                                  showTests
+                                  showResults={false}
+                                  showTests={false}
                                   perQuestionTests={testsRecord}
                                   perQuestionTestDetails={detailsRecord}
+                                  hideAnswerInput
+                                  hideStatusIcons
+                                  questionNumberOverride={idx + 1}
                                 />
                                 <div className="border rounded-md p-3">
                                   <div className="font-medium mb-2">Teacher Test Inputs (Question {item.id})</div>

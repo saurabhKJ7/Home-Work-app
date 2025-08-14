@@ -23,9 +23,14 @@ interface MathQuestionProps {
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
   hintsByQuestion?: Record<string, string>;
+  // Optional UI controls for teacher preview
+  hideAnswerInput?: boolean;
+  hideStatusIcons?: boolean;
+  // When rendering a single-problem array per component, allow overriding the shown number
+  questionNumberOverride?: number;
 }
 
-const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: MathQuestionProps) => {
+const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {}, hideAnswerInput = false, hideStatusIcons = false, questionNumberOverride }: MathQuestionProps) => {
   const [answers, setAnswers] = useState<{ [key: string]: any }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string) => {
@@ -52,10 +57,10 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center space-x-2">
                 <span className="w-8 h-8 bg-primary/10 text-primary rounded-full flex items-center justify-center text-sm font-bold">
-                  {index + 1}
+                  {questionNumberOverride ?? (index + 1)}
                 </span>
                 <span>Math Problem</span>
-                {showResults && (
+                {showResults && !hideStatusIcons && (
                   <div className="ml-auto">
                     {isCorrect(problem.id) ? (
                       <CheckCircle className="w-5 h-5 text-success" />
@@ -68,22 +73,23 @@ const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = fa
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-lg font-medium">{problem.question}</p>
-              <div className="flex items-center space-x-3">
-                <span className="text-muted-foreground">Answer:</span>
-                <Input
-                  // type="number"
-                  placeholder="Your answer"
-                  value={answers[problem.id] || ''}
-                  onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
-                  disabled={isReadOnly}
-                  className={showResults ? (
-                    isCorrect(problem.id) 
-                      ? "border-success bg-success/5" 
-                      : "border-destructive bg-destructive/5"
-                  ) : ""}
-                />
-
-              </div>
+              {!hideAnswerInput && (
+                <div className="flex items-center space-x-3">
+                  <span className="text-muted-foreground">Answer:</span>
+                  <Input
+                    // type="number"
+                    placeholder="Your answer"
+                    value={answers[problem.id] || ''}
+                    onChange={(e) => handleAnswerChange(problem.id, e.target.value)}
+                    disabled={isReadOnly}
+                    className={showResults ? (
+                      isCorrect(problem.id) 
+                        ? "border-success bg-success/5" 
+                        : "border-destructive bg-destructive/5"
+                    ) : ""}
+                  />
+                </div>
+              )}
               {showResults && showTests && (
                 <div className="text-sm text-muted-foreground">
                   Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? Math.min(5, problem.validation_tests?.length || 5)}
