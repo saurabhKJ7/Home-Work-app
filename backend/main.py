@@ -24,6 +24,8 @@ from models.schema import (
     MetaValidationRequest,
     HintRequest,
     HintResponse,
+    StudentFeedbackRequest,
+    StudentFeedbackResponse,
 )
 from models.db_models import Activity as DBActivity, Attempt as DBAttempt, User as DBUser
 from utils.db import get_db, Base, engine
@@ -38,6 +40,7 @@ from src.retrieval import retrieve_similar_examples, get_embeddings
 from src.validation_pipeline import run_validation_pipeline, validate_student_submission
 from models.db_models import Activity as DBActivity
 from src.improved_rag import get_enhanced_rag_data
+from src.feedback_generator import generate_feedback
 
 load_dotenv()
 
@@ -406,7 +409,20 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
                     payload.attempt_number
                 )
             
-            # Hints augmentation removed: do not append LLM-generated hints to feedback
+            # Generate adaptive feedback (attempt-aware, per question)
+            try:
+                # Attempt number can influence response; we default to 1
+                attempt_number = payload.attempt_number or 1
+                fb = generate_feedback(activity, payload.grid_response or payload.student_response, bool(result.is_correct), float(result.confidence_score or 0.0) * 100.0 if hasattr(result, 'confidence_score') else (100.0 if result.is_correct else 0.0), attempt_number)
+                # Prefer generated overall message but preserve correctness/confidence from validation
+                result.feedback = str(fb.get("overall_message") or result.feedback or "")
+                # Attach metadata for per-question feedback
+                meta = dict(result.metadata or {})
+                meta["per_question_feedback"] = fb.get("per_question_feedback") or {}
+                meta["cues"] = fb.get("cues") or {}
+                result.metadata = meta
+            except Exception:
+                logger.exception("/validate-function: feedback generation failed; continuing with base result")
             return result
             
         except Exception:
@@ -836,6 +852,40 @@ def select_hint(
         raise
     except Exception:
         logger.exception("/activities/%s/select-hint failed", activity_id)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/activities/{activity_id}/feedback", response_model=StudentFeedbackResponse)
+def get_student_feedback(
+    activity_id: str,
+    payload: StudentFeedbackRequest,
+    db: Session = Depends(get_db),
+    user: DBUser = Depends(get_current_user),
+):
+    try:
+        activity = db.query(DBActivity).filter(DBActivity.id == activity_id).first()
+        if not activity:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        if user.role not in ("student", "teacher"):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        fb = generate_feedback(
+            activity,
+            payload.submission,
+            bool(payload.is_correct) if payload.is_correct is not None else False,
+            float(payload.score_percentage or 0.0),
+            int(payload.attempt_number or 1),
+        )
+        return StudentFeedbackResponse(
+            overall_message=str(fb.get("overall_message", "")),
+            per_question_feedback=dict(fb.get("per_question_feedback") or {}),
+            confidence_score=float(fb.get("confidence_score", 0.0)),
+            cues=dict(fb.get("cues") or {}),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("/activities/%s/feedback failed", activity_id)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/activities/{activity_id}/attempts", response_model=AttemptRead)

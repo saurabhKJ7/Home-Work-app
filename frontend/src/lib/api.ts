@@ -170,6 +170,15 @@ export async function selectHint(activityId: string, student_response: any, toke
   return postJson(`/activities/${activityId}/select-hint`, { activity_id: activityId, question_id, student_response }, token);
 }
 
+// Student feedback generation (server-side GPT-4o mini)
+export async function requestFeedback(
+  activityId: string,
+  data: { submission: any; is_correct?: boolean; score_percentage?: number; attempt_number?: number; question_id?: string },
+  token: string
+): Promise<{ overall_message: string; per_question_feedback: Record<string, string>; confidence_score: number; cues: Record<string, string> }>{
+  return postJson(`/activities/${activityId}/feedback`, data, token);
+}
+
 // Client-side validation using the activity's validation function
 export function validateSubmission(
   submission: any,

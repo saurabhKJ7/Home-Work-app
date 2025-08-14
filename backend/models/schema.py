@@ -154,3 +154,19 @@ class AttemptRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- Student feedback API ---
+
+class StudentFeedbackRequest(BaseModel):
+    submission: Any
+    is_correct: Optional[bool] = None
+    score_percentage: Optional[float] = None
+    attempt_number: Optional[int] = 1
+    question_id: Optional[str] = None
+
+class StudentFeedbackResponse(BaseModel):
+    overall_message: str
+    per_question_feedback: Dict[str, str] = {}
+    confidence_score: float = 0.0
+    cues: Dict[str, str] = {}

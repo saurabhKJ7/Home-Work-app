@@ -10,7 +10,7 @@ import LogicQuestion from "@/components/LogicQuestion";
 import { ArrowLeft, Clock, CheckCircle, XCircle, Trophy, RotateCcw, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { getActivityById, submitAttempt, postJson, validateSubmission, selectHint } from "@/lib/api";
+import { getActivityById, submitAttempt, postJson, validateSubmission, selectHint, requestFeedback } from "@/lib/api";
 import { ValidationService } from "@/lib/validation";
 
 // Mock activity data with content
@@ -91,6 +91,7 @@ const ActivityDetail = () => {
   const [activity, setActivity] = useState<any>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<any>(null);
+  const [serverFeedback, setServerFeedback] = useState<{ overall_message: string; per_question_feedback: Record<string, string>; cues?: any } | null>(null);
   const [startTime] = useState(new Date());
   const [isLoading, setIsLoading] = useState(true);
 
@@ -388,6 +389,19 @@ const ActivityDetail = () => {
           feedback: validationResult.feedback,
           confidence_score: validationResult.confidence_score || 0
         }, token);
+        // Request server-side adaptive feedback (attempt-aware) for grid
+        try {
+          const fb = await requestFeedback(id, {
+            submission: answers,
+            is_correct: validationResult.is_correct,
+            score_percentage: scoreData.percentage,
+            attempt_number: (activity.attempts_count || 0) + 1,
+          }, token);
+          setServerFeedback({ overall_message: fb.overall_message, per_question_feedback: fb.per_question_feedback, cues: fb.cues });
+          result.feedback = fb.overall_message || result.feedback;
+        } catch (e) {
+          console.warn('[Feedback][Grid] Failed to fetch server feedback:', e);
+        }
       } catch (error) {
         console.error('Error submitting attempt:', error);
       }
@@ -571,6 +585,20 @@ const ActivityDetail = () => {
         feedback: validationResult.feedback,
         confidence_score: validationResult.confidence_score || 0
       }, token);
+      // Request server-side adaptive feedback (attempt-aware)
+      try {
+        const fb = await requestFeedback(id, {
+          submission: answers,
+          is_correct: validationResult.is_correct,
+          score_percentage: scoreData.percentage,
+          attempt_number: (activity.attempts_count || 0) + 1,
+        }, token);
+        setServerFeedback({ overall_message: fb.overall_message, per_question_feedback: fb.per_question_feedback, cues: fb.cues });
+        // Prefer server overall message in UI
+        result.feedback = fb.overall_message || result.feedback;
+      } catch (e) {
+        console.warn('[Feedback] Failed to fetch server feedback:', e);
+      }
       
             // Hints feature removed: do not request or attach hints
       
@@ -718,11 +746,21 @@ const ActivityDetail = () => {
                   {submissionResult.score.percentage}%
                 </CardTitle>
               </div>
-              <CardDescription className="text-lg">
+            <CardDescription className="text-lg">
                 {submissionResult.feedback}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {serverFeedback?.per_question_feedback && Object.keys(serverFeedback.per_question_feedback).length > 0 && (
+                <div className="border rounded-md p-3 bg-muted/30">
+                  <div className="text-sm font-medium mb-2">Per-question feedback</div>
+                  <ul className="text-sm space-y-1">
+                    {Object.entries(serverFeedback.per_question_feedback).map(([qid, msg]) => (
+                      <li key={qid}><span className="font-semibold">Q{qid}:</span> {String(msg)}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="text-center">
                   <div className="text-2xl font-bold text-success">
