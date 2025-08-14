@@ -7,7 +7,7 @@ import { CheckCircle, XCircle } from "lucide-react";
 interface MathProblem {
   id: string;
   question: string;
-  answer: number;
+  answer: any;
   input_example?: any;
   expected_output?: any;
   validation_tests?: Array<{ input: any; expectedOutput: any }>;
@@ -15,32 +15,33 @@ interface MathProblem {
 
 interface MathQuestionProps {
   problems: MathProblem[];
-  onSubmit: (answers: { [key: string]: number }) => void;
+  onSubmit: (answers: { [key: string]: any }) => void;
   isReadOnly?: boolean;
   showResults?: boolean;
   showTests?: boolean;
-  userAnswers?: { [key: string]: number };
+  userAnswers?: { [key: string]: any };
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
   hintsByQuestion?: Record<string, string>;
 }
 
 const MathQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: MathQuestionProps) => {
-  const [answers, setAnswers] = useState<{ [key: string]: number }>(userAnswers);
+  const [answers, setAnswers] = useState<{ [key: string]: any }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string) => {
     if (isReadOnly) return;
-    
-    const numValue = value === '' ? 0 : parseFloat(value) || 0;
+    // Accept any input (text, numbers, JSON-like, special chars)
     setAnswers(prev => ({
       ...prev,
-      [problemId]: numValue
+      [problemId]: value
     }));
   };
 
   const isCorrect = (problemId: string) => {
     const problem = problems.find(p => p.id === problemId);
-    return problem && answers[problemId] === problem.answer;
+    if (!problem) return false;
+    // Compare as strings for a permissive check in the UI indicator
+    return String(answers[problemId]) === String((problem as any).answer);
   };
 
   return (

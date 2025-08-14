@@ -11,7 +11,7 @@ interface LogicProblem {
   question: string;
   type: 'text' | 'multiple-choice';
   options?: string[];
-  answer: string | number;
+  answer: any;
   input_example?: any;
   expected_output?: any;
   validation_tests?: Array<{ input: any; expectedOutput: any }>;
@@ -19,18 +19,18 @@ interface LogicProblem {
 
 interface LogicQuestionProps {
   problems: LogicProblem[];
-  onSubmit: (answers: { [key: string]: string | number }) => void;
+  onSubmit: (answers: { [key: string]: any }) => void;
   isReadOnly?: boolean;
   showResults?: boolean;
   showTests?: boolean;
-  userAnswers?: { [key: string]: string | number };
+  userAnswers?: { [key: string]: any };
   perQuestionTests?: Record<string, { passed: number; total: number }>;
   perQuestionTestDetails?: Record<string, Array<{ input: any; expected: any; actual: any; passed: boolean }>>;
   hintsByQuestion?: Record<string, string>;
 }
 
 const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = false, showTests = false, userAnswers = {}, perQuestionTests = {}, perQuestionTestDetails = {}, hintsByQuestion = {} }: LogicQuestionProps) => {
-  const [answers, setAnswers] = useState<{ [key: string]: string | number }>(userAnswers);
+  const [answers, setAnswers] = useState<{ [key: string]: any }>(userAnswers);
 
   const handleAnswerChange = (problemId: string, value: string | number) => {
     if (isReadOnly) return;
@@ -43,7 +43,9 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
 
   const isCorrect = (problemId: string) => {
     const problem = problems.find(p => p.id === problemId);
-    return problem && answers[problemId]?.toString() === problem.answer.toString();
+    if (!problem) return false;
+    // Permissive UI comparison
+    return String(answers[problem.id]) === String((problem as any).answer);
   };
 
   return (
