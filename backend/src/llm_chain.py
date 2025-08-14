@@ -599,6 +599,38 @@ Your output must strictly follow the JSON format described above.
         result.validationTests = corrected_tests
         logger.info("get_evaluate_function: auto-corrected %d/%d test expectedOutput values", 
                    corrections_made, len(corrected_tests))
+
+        # If the model failed to provide top-level expectedOutput or inputExample,
+        # infer them from the first successful test result so the API never returns nulls.
+        try:
+            top_level_expected_missing = not hasattr(result, 'expectedOutput') or result.expectedOutput in (None, "")
+            top_level_input_missing = not hasattr(result, 'inputExample') or result.inputExample in (None, {})
+
+            # Find the first test with a concrete actual value
+            first_ok = next((r for r in (test_results or []) if r.get("actual") is not None), None)
+            if (top_level_expected_missing or top_level_input_missing) and first_ok is not None:
+                # Set expectedOutput from the actual result of the first passing execution
+                if top_level_expected_missing:
+                    try:
+                        setattr(result, 'expectedOutput', first_ok.get("actual"))
+                        logger.info("get_evaluate_function: filled missing expectedOutput from tests")
+                    except Exception:
+                        logger.exception("get_evaluate_function: failed setting expectedOutput from tests")
+
+                # Set inputExample from the corresponding test input if missing
+                if top_level_input_missing:
+                    try:
+                        test_index = first_ok.get("index")
+                        if isinstance(test_index, int) and test_index < len(result.validationTests):
+                            setattr(result, 'inputExample', result.validationTests[test_index].input)
+                        else:
+                            # Fallback to first test's input
+                            setattr(result, 'inputExample', result.validationTests[0].input if result.validationTests else {})
+                        logger.info("get_evaluate_function: filled missing inputExample from tests")
+                    except Exception:
+                        logger.exception("get_evaluate_function: failed setting inputExample from tests")
+        except Exception:
+            logger.exception("get_evaluate_function: failed to infer top-level input/expected from tests")
         
     except Exception as e:
         logger.exception("Failed to auto-correct expectedOutput values: %s", e)

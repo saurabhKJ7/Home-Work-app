@@ -237,9 +237,16 @@ const TeacherDashboard = () => {
       const { name, params } = extractFunctionMeta(code);
       const fn: any = new Function(`${code}; return ${name};`)();
       const callWithInput = (input: any) => {
-        if (params.length > 1 && input && typeof input === 'object' && !Array.isArray(input)) {
-          const args = params.map(p => input[p]);
-          return fn(...args);
+        if (input && typeof input === 'object' && !Array.isArray(input)) {
+          if (params.length > 1) {
+            const args = params.map(p => (input as any)[p]);
+            return fn(...args);
+          }
+          if (params.length === 1) {
+            const only = params[0];
+            const value = (input as any)[only] !== undefined ? (input as any)[only] : Object.values(input)[0];
+            return fn(value);
+          }
         }
         return fn(input);
       };
@@ -775,10 +782,14 @@ const TeacherDashboard = () => {
                                     <Button
                                       variant="outline"
                                       onClick={() => {
-                                        const tests = (teacherSelectedTests[item.id] || []).map((t: any, i: number) => ({
-                                          input: t.input,
-                                          expectedOutput: parseTeacherValue((teacherResponses[item.id] || [])[i] ?? '')
-                                        }));
+                                        const tests = (teacherSelectedTests[item.id] || []).map((t: any, i: number) => {
+                                          const teacherVal = (teacherResponses[item.id] || [])[i];
+                                          const hasTeacher = teacherVal !== undefined && String(teacherVal).trim() !== '';
+                                          return {
+                                            input: t.input,
+                                            expectedOutput: hasTeacher ? parseTeacherValue(teacherVal) : t.expectedOutput
+                                          };
+                                        });
                                         const res = runTestsForQuestion(item.code, tests, item.input_example);
                                         setPreviewActivity((prev: any) => ({
                                           ...prev,
@@ -849,10 +860,14 @@ const TeacherDashboard = () => {
                                     <Button
                                       variant="outline"
                                       onClick={() => {
-                                        const tests = (teacherSelectedTests[item.id] || []).map((t: any, i: number) => ({
-                                          input: t.input,
-                                          expectedOutput: parseTeacherValue((teacherResponses[item.id] || [])[i] ?? '')
-                                        }));
+                                        const tests = (teacherSelectedTests[item.id] || []).map((t: any, i: number) => {
+                                          const teacherVal = (teacherResponses[item.id] || [])[i];
+                                          const hasTeacher = teacherVal !== undefined && String(teacherVal).trim() !== '';
+                                          return {
+                                            input: t.input,
+                                            expectedOutput: hasTeacher ? parseTeacherValue(teacherVal) : t.expectedOutput
+                                          };
+                                        });
                                         const res = runTestsForQuestion(item.code, tests, item.input_example);
                                         setPreviewActivity((prev: any) => ({
                                           ...prev,
