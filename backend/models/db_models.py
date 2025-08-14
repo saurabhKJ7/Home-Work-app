@@ -25,9 +25,9 @@ class Activity(Base):
     expected_output = Column(JSONB, nullable=True)  # Expected output for the example
     validation_tests = Column(JSONB, nullable=True)  # Array of test cases
     test_cases_count = Column(Integer, nullable=False, default=10)  # Number of test cases
-    # Hints and output format
+    # Output format (hints removed)
     output_format = Column(String, nullable=True)
-    feedback_hints = Column(JSONB, nullable=True)  # Array of 10 hint-only feedback strings
+    # feedback_hints removed from use
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 

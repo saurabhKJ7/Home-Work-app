@@ -76,8 +76,7 @@ const createDynamicContent = (questions: any[], activityType: string) => {
       question_id: q.question_id,
       input_example: q.input_example,
       expected_output: q.expected_output,
-      validation_tests: q.validation_tests || [],
-      feedback_hints: q.feedback_hints || []
+      validation_tests: q.validation_tests || []
     }));
   } else if (activityType === 'Logical') {
     content.logic = questions.map((q: any, index: number) => ({
@@ -89,8 +88,7 @@ const createDynamicContent = (questions: any[], activityType: string) => {
       question_id: q.question_id,
       input_example: q.input_example,
       expected_output: q.expected_output,
-      validation_tests: q.validation_tests || [],
-      feedback_hints: q.feedback_hints || []
+      validation_tests: q.validation_tests || []
     }));
   }
   
@@ -793,17 +791,11 @@ const TeacherDashboard = () => {
                                       Run Test Cases
                                     </Button>
                                     {previewActivity?.perQuestionMetrics?.[item.id] && (
-                                      <div className="mt-2 text-xs text-muted-foreground">
+                                    <div className="mt-2 text-xs text-muted-foreground">
                                         <div>accuracy_score: {previewActivity.perQuestionMetrics[item.id].accuracy_score?.toFixed ? previewActivity.perQuestionMetrics[item.id].accuracy_score.toFixed(2) : previewActivity.perQuestionMetrics[item.id].accuracy_score}</div>
                                         <div>false_positive_count: {previewActivity.perQuestionMetrics[item.id].false_positive_count}</div>
                                         <div>false_negative_count: {previewActivity.perQuestionMetrics[item.id].false_negative_count}</div>
                                         <div>confidence_level: {previewActivity.perQuestionMetrics[item.id].confidence_level}</div>
-                                        {Array.isArray(previewActivity.perQuestionMetrics[item.id].edge_case_failures) && (
-                                          <div>edge_case_failures: {previewActivity.perQuestionMetrics[item.id].edge_case_failures.length}</div>
-                                        )}
-                                        {Array.isArray(previewActivity.perQuestionMetrics[item.id].improvement_suggestions) && previewActivity.perQuestionMetrics[item.id].improvement_suggestions.length > 0 && (
-                                          <div>improvement_suggestions: {previewActivity.perQuestionMetrics[item.id].improvement_suggestions.join('; ')}</div>
-                                        )}
                                       </div>
                                     )}
                                   </div>

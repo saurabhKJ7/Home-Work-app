@@ -406,22 +406,7 @@ async def validate_function_endpoint(payload: ValidationRequest, db: Session = D
                     payload.attempt_number
                 )
             
-            # Incorporate model-provided hints if available on the activity
-            if hasattr(activity, "feedback_hints") and activity.feedback_hints and not result.is_correct:
-                try:
-                    from src.feedback_generator import generate_feedback
-                    hints = list(activity.feedback_hints or [])
-                    enriched = generate_feedback(
-                        is_correct=False,
-                        prompt=activity.problem_statement,
-                        submission=payload.student_response,
-                        attempt_number=payload.attempt_number,
-                        activity_type=activity.type,
-                        hints=hints,
-                    )
-                    result.feedback = enriched.get("tableEndText", result.feedback)
-                except Exception:
-                    logger.exception("/validate-function: failed to augment feedback with hints")
+            # Hints augmentation removed: do not append LLM-generated hints to feedback
             return result
             
         except Exception:
@@ -527,9 +512,9 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
                             "type": "text",
                             "answer": question.expected_output if hasattr(question, 'expected_output') else "",
                             "question_id": question.question_id,
-                            "validation_function": question.code,
-                            "input_example": question.input_example if hasattr(question, 'input_example') else None,
-                            "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
+                        "validation_function": question.code,
+                        "input_example": question.input_example if hasattr(question, 'input_example') else None,
+                        "validation_tests": question.validation_tests if hasattr(question, 'validation_tests') and question.validation_tests else []
                         }
                     for idx, question in enumerate(payload.questions)
                 ],
@@ -649,8 +634,7 @@ def create_activity(payload: ActivityCreate, db: Session = Depends(get_db), user
             # Store test cases directly in the activity
             input_example=payload.questions[0].input_example if payload.questions else None,
             expected_output=payload.questions[0].expected_output if payload.questions else None,
-            validation_tests=payload.questions[0].validation_tests if payload.questions else None,
-            feedback_hints=payload.questions[0].feedback_hints if payload.questions and hasattr(payload.questions[0], 'feedback_hints') else None
+            validation_tests=payload.questions[0].validation_tests if payload.questions else None
         )
         db.add(activity)
         db.flush()

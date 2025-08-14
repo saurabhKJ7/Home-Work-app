@@ -25,7 +25,6 @@ class StructuredOutput(BaseModel):
     inputExample: Dict[str, Any] = Field(description="Example input parameters as JSON object")
     expectedOutput: Any = Field(description="Expected output for the input example")
     validationTests: List[TestCase] = Field(description="Array of 10 test cases to verify correctness")
-    feedbackHints: List[str] = Field(description="Exactly 10 short, hint-only feedback messages that do NOT reveal the answer")
 
 class GridStructuredOutput(BaseModel):
     question: str = Field(description="The specific grid puzzle description with rules and objectives")
@@ -35,7 +34,6 @@ class GridStructuredOutput(BaseModel):
     gridSize: Dict[str, int] = Field(description="Grid dimensions with 'rows' and 'cols' keys")
     difficulty: str = Field(description="Puzzle difficulty level")
     validationTests: List[TestCase] = Field(description="Array of 10 test cases to verify correctness")
-    feedbackHints: List[str] = Field(description="Exactly 10 short, hint-only feedback messages for incorrect attempts")
 
 
 LANGSMITH_TRACING="true"
@@ -303,7 +301,6 @@ Given a user prompt, create a grid-based puzzle with the following requirements:
 4. **Validation Function**: JavaScript function that checks if user's grid is correct
 5. **Grid Size**: Specify rows and cols (keep between 4x4 to 9x9 for usability)
 6. **Validation Tests**: Exactly 10 test cases to verify the validation function works
-7. **Feedback Hints**: 10 helpful hints for solving the puzzle
 
 USER PROMPT: "{user_prompt}"
 
@@ -501,17 +498,14 @@ Given a user prompt, your job is to generate:
           {{ "input": ..., "expectedOutput": ... }},
           ...
         ]
- 4. A field `feedbackHints` containing exactly 10 short hints that help a student who answers incorrectly.
-    - The hints must NOT reveal the final answer.
-    - Focus on common mistakes, reminders, and step cues.
-    - 1–2 sentences each, specific to this problem.
+ 4. Do NOT include any hints field. Only provide the fields required by the schema.
 USER QUERY: "{user_prompt}"
 IMPORTANT RULES:
 - :white_check_mark: The question must be a **concrete math problem**, not a general request for a function.
 - :white_check_mark: The JavaScript function must directly solve that problem and return the correct result.
 - :white_check_mark: The "code" field must contain **only** the complete function definition — no example calls, no console.log statements, and no usage comments.
 - :white_check_mark: Include a matching inputExample and expectedOutput as part of the structured JSON.
-- :white_check_mark: Provide exactly 10 hint-only feedbacks in `feedbackHints`; do not include the solution.
+ - :white_check_mark: Do NOT include any hints field.
 - :x: Do NOT return abstract tasks like "Write a function to calculate area."
 - :x: Do NOT return a generic utility function.
 - :x: Do NOT include any extra explanation, markdown, or natural language outside the JSON object.

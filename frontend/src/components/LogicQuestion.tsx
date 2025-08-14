@@ -124,11 +124,7 @@ const LogicQuestion = ({ problems, onSubmit, isReadOnly = false, showResults = f
                   Tests passed: {perQuestionTests[problem.id]?.passed ?? 0}/{perQuestionTests[problem.id]?.total ?? Math.min(5, problem.validation_tests?.length || 5)}
                 </div>
               )}
-              {showResults && hintsByQuestion[problem.id] && (
-                <div className="mt-2 text-sm border rounded-md p-2 bg-warning/5 text-foreground">
-                  <span className="font-medium">Hint:</span> {hintsByQuestion[problem.id]}
-                </div>
-              )}
+              {/* Hints removed */}
               {showResults && showTests && perQuestionTestDetails[problem.id] && (
                 <div className="mt-2 border rounded-md p-2 bg-muted/30">
                   <div className="text-xs font-medium mb-1">Test details</div>
