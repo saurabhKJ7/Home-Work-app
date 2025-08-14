@@ -106,7 +106,8 @@ const StudentPortal = () => {
           createdAt: item.created_at,
           userId: item.user_id,
           validation_function: item.validation_function,
-          ui_config: item.ui_config
+          ui_config: item.ui_config,
+          attempts_count: item.attempts_count
         }));
         setActivities(mappedActivities);
       } catch (error) {

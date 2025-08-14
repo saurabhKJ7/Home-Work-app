@@ -698,7 +698,8 @@ def list_activities(db: Session = Depends(get_db), user: DBUser = Depends(get_cu
                 correct_answers=a.correct_answers,
                 created_at=a.created_at,
                 is_completed=False,  # Teachers don't complete activities
-                best_score=0.0
+                best_score=0.0,
+                attempts_count=0,
             )
             for a in rows
         ]
@@ -706,18 +707,20 @@ def list_activities(db: Session = Depends(get_db), user: DBUser = Depends(get_cu
         # For students, we need to join with attempts to get completion status
         activities = db.query(DBActivity).order_by(DBActivity.created_at.desc()).all()
         
-        # Get all successful attempts for this student
+        # Get all attempts for this student
         student_attempts = db.query(DBAttempt).filter(
             DBAttempt.user_id == user.id
         ).all()
         
-        # Create a map of activity_id to best attempt
+        # Create attempt stats per activity
         activity_attempts = {}
+        attempts_count_map = {}
         for attempt in student_attempts:
             current_best = activity_attempts.get(attempt.activity_id)
             attempt_score = float(attempt.score_percentage)
             if not current_best or attempt_score > float(current_best.score_percentage):
                 activity_attempts[attempt.activity_id] = attempt
+            attempts_count_map[attempt.activity_id] = attempts_count_map.get(attempt.activity_id, 0) + 1
         
         return [
             ActivityRead(
@@ -733,7 +736,8 @@ def list_activities(db: Session = Depends(get_db), user: DBUser = Depends(get_cu
                 correct_answers=a.correct_answers,
                 created_at=a.created_at,
                 is_completed=bool(activity_attempts.get(a.id) and activity_attempts[a.id].is_correct == "true"),
-                best_score=float(activity_attempts[a.id].score_percentage) if a.id in activity_attempts else 0.0
+                best_score=float(activity_attempts[a.id].score_percentage) if a.id in activity_attempts else 0.0,
+                attempts_count=int(attempts_count_map.get(a.id, 0)),
             )
             for a in activities
         ]
@@ -763,6 +767,10 @@ def get_activity(activity_id: str, db: Session = Depends(get_db), user: DBUser =
         validation_function=a.validation_function,
         correct_answers=a.correct_answers,
         created_at=a.created_at,
+        # For students include attempts_count and completion/best score
+        is_completed=False if user.role == "teacher" else False,
+        best_score=0.0,
+        attempts_count=db.query(DBAttempt).filter(DBAttempt.user_id == user.id, DBAttempt.activity_id == activity_id).count() if user.role == "student" else 0,
     )
 
 

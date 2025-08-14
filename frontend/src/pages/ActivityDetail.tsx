@@ -117,7 +117,7 @@ const ActivityDetail = () => {
         console.log('UI Config from backend:', activityData.ui_config);
         
         // Transform the data to match our component's expected format
-        const transformedActivity = {
+          const transformedActivity = {
           id: activityData.id,
           title: activityData.title,
           worksheetLevel: activityData.worksheet_level,
@@ -129,7 +129,8 @@ const ActivityDetail = () => {
           content: activityData.ui_config || {},
           validation_function: activityData.validation_function,
           input_example: activityData.input_example,
-          expected_output: activityData.expected_output
+            expected_output: activityData.expected_output,
+            attempts_count: activityData.attempts_count
         };
         
         // If we don't have content from the backend, create single-question content based on activity
@@ -722,6 +723,11 @@ const ActivityDetail = () => {
                 {activity.difficulty}
               </Badge>
             </div>
+            {typeof activity.attempts_count === 'number' && (
+              <div className="mt-2 text-sm text-muted-foreground">
+                Attempts made: <span className="font-medium">{activity.attempts_count}</span>
+              </div>
+            )}
             <p className="text-foreground/80 mt-4">{activity.problemStatement}</p>
           </CardHeader>
         </Card>

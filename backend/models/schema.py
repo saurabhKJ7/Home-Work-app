@@ -124,6 +124,7 @@ class ActivityRead(ActivityBase):
     created_at: datetime
     is_completed: bool = False  # Whether the current student has completed this activity
     best_score: float = 0.0    # Student's best score on this activity
+    attempts_count: int = 0    # Number of attempts by the current student on this activity
 
     class Config:
         from_attributes = True

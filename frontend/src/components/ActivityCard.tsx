@@ -16,6 +16,7 @@ export interface Activity {
   ui_config?: Record<string, any>;
   is_completed?: boolean;
   best_score?: number;
+  attempts_count?: number;
 }
 
 interface ActivityCardProps {
@@ -87,6 +88,12 @@ const ActivityCard = ({ activity, onStart, onDelete }: ActivityCardProps) => {
         </p>
       </CardContent>
       <CardFooter className="flex flex-col gap-2">
+        {typeof activity.attempts_count === 'number' && (
+          <div className="flex items-center justify-between w-full text-sm text-muted-foreground">
+            <span>Attempts</span>
+            <span className="font-medium">{activity.attempts_count}</span>
+          </div>
+        )}
         {activity.is_completed && (
           <div className="flex items-center justify-between w-full text-sm text-success">
             <span className="flex items-center gap-1">
