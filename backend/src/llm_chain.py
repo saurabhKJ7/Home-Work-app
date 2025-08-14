@@ -277,7 +277,7 @@ console.log(JSON.stringify(out));
 
     return data
 
-def get_grid_function(user_prompt, activity_type="Grid-based", optimize_for_speed=False):
+def get_grid_function(user_prompt, activity_type="Grid-based", optimize_for_speed=False, difficulty: str | None = None):
     """
     Generate a grid-based puzzle (Sudoku, number grid, etc.)
     Returns a GridStructuredOutput with 2D array structure.
@@ -288,6 +288,21 @@ def get_grid_function(user_prompt, activity_type="Grid-based", optimize_for_spee
     parser = PydanticOutputParser(pydantic_object=GridStructuredOutput)
     format_instructions = parser.get_format_instructions()
     
+    # Difficulty guidance to shape grid size and number of givens
+    _diff = (difficulty or "Medium").strip().lower()
+    if _diff == "easy":
+        diff_requirements = (
+            "Prefer smaller grids (4x4 or 6x6). Include many givens and straightforward constraints so it's quickly solvable."
+        )
+    elif _diff == "hard":
+        diff_requirements = (
+            "Prefer larger or more constrained grids (8x8 or 9x9). Fewer givens and deeper reasoning required, but still solvable."
+        )
+    else:
+        diff_requirements = (
+            "Prefer moderate grid sizes (6x6). Balanced number of givens and constraints with moderate reasoning depth."
+        )
+
     template = """
 You are a grid puzzle generation system that creates interactive grid-based puzzles.
 Your output must be in the following JSON format:
@@ -335,19 +350,25 @@ VALIDATION TESTS REQUIREMENTS:
 - Each test case should have: {{"input": {{"grid": [[...]]}}, "expectedOutput": true/false}}
 - Make sure the validation function passes all tests
 
+DIFFICULTY LEVEL: "{difficulty}"
+DIFFICULTY REQUIREMENTS:
+{diff_requirements}
+
 Your output must strictly follow the JSON format described above.
 """
     
     prompt = PromptTemplate(
         template=template,
-        input_variables=["user_prompt", "format_instructions"]
+        input_variables=["user_prompt", "format_instructions", "difficulty", "diff_requirements"]
     )
     
     chain = prompt | llm | parser
     
     result = chain.invoke({
         "user_prompt": user_prompt,
-        "format_instructions": format_instructions
+        "format_instructions": format_instructions,
+        "difficulty": difficulty or "Medium",
+        "diff_requirements": diff_requirements,
     })
     
     logger.info("get_grid_function: generated grid puzzle %dx%d", 
@@ -461,7 +482,7 @@ console.log(JSON.stringify({{ isValid: isValid, grid: gridResponse }}));
 
 
 from datetime import datetime
-def get_evaluate_function(rag_data, user_prompt, optimize_for_speed=False):
+def get_evaluate_function(rag_data, user_prompt, optimize_for_speed=False, difficulty: str | None = None, activity_type: str | None = None):
     """
     Create a chain to generate both a question and JavaScript function based on a user query.
     The RAG data contains previous user prompts and their respective JS function code.
@@ -481,6 +502,21 @@ def get_evaluate_function(rag_data, user_prompt, optimize_for_speed=False):
 
     parser = PydanticOutputParser(pydantic_object=StructuredOutput)
     format_instructions = parser.get_format_instructions()
+
+    # Add difficulty guidance for complexity control
+    _diff = (difficulty or "Medium").strip().lower()
+    if _diff == "easy":
+        diff_requirements = (
+            "Single-step arithmetic/basic concepts, small integers (0-20), no fractions/roots; answer straightforward."
+        )
+    elif _diff == "hard":
+        diff_requirements = (
+            "Multi-step reasoning, composites (fractions, exponents, systems), moderately larger numbers (<=1000); exact solution required."
+        )
+    else:
+        diff_requirements = (
+            "2-3 steps of reasoning with clear numeric values, include order-of-operations or unit conversion; numbers typically <=200."
+        )
 
     template = """
 You are an educational content generation system that creates math problems and their solution code.
@@ -503,6 +539,8 @@ Given a user prompt, your job is to generate:
         ]
  4. Do not include any extra explanatory fields beyond the specified schema.
 USER QUERY: "{user_prompt}"
+ACTIVITY TYPE CONTEXT: "{activity_type}"
+DIFFICULTY LEVEL: "{difficulty}"
 IMPORTANT RULES:
 - :white_check_mark: The question must be a **concrete math problem**, not a general request for a function.
 - :white_check_mark: The JavaScript function must directly solve that problem and return the correct result.
@@ -518,9 +556,11 @@ TOPIC ADHERENCE RULES:
  - If the USER QUERY references a physics topic (e.g., "Newton's laws of motion"), create a numerical word problem that applies that topic (e.g., F = m × a, friction, net force, momentum) and generate code that solves it.
  - DO NOT generate matrix, vector, or unrelated linear algebra tasks unless the USER QUERY explicitly asks for them.
  - Prefer simple numeric inputs with units and realistic values. Include units in the question text but return numeric outputs from code.
-
-
-
+ 
+DIFFICULTY REQUIREMENTS:
+{diff_requirements}
+ 
+ 
 CRITICAL TEST CASE GENERATION RULES:
 - For every test in validationTests YOU MUST:
   • Step 1: Write down the input values clearly
@@ -551,11 +591,19 @@ Your output must strictly follow the JSON format described above.
 """
     prompt = PromptTemplate(
         template=template,
-        input_variables=["rag_data_str", "user_prompt", "format_instructions", "input"],
+        input_variables=["rag_data_str", "user_prompt", "format_instructions", "input", "difficulty", "diff_requirements", "activity_type"],
         partial_variables={"input": ""}  # Provide a default empty value for the input variable
     )
     chain = (
-        {"rag_data_str": RunnablePassthrough(), "user_prompt": RunnablePassthrough(), "format_instructions": RunnablePassthrough(), "input": RunnablePassthrough()}
+        {
+            "rag_data_str": RunnablePassthrough(),
+            "user_prompt": RunnablePassthrough(),
+            "format_instructions": RunnablePassthrough(),
+            "input": RunnablePassthrough(),
+            "difficulty": RunnablePassthrough(),
+            "diff_requirements": RunnablePassthrough(),
+            "activity_type": RunnablePassthrough(),
+        }
         | prompt
         | llm
         | parser
@@ -564,7 +612,10 @@ Your output must strictly follow the JSON format described above.
         "rag_data_str": rag_data_str,
         "user_prompt": user_prompt,
         "format_instructions": format_instructions,
-        "input": ""  # Provide empty string for input
+        "input": "",
+        "difficulty": difficulty or "Medium",
+        "diff_requirements": diff_requirements,
+        "activity_type": activity_type or "Mathematical",
     })
     
     # Skip validation pipeline if optimizing for speed

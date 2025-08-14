@@ -395,6 +395,7 @@ const TeacherDashboard = () => {
         { 
           user_query: formData.problemStatement || formData.title, 
           type: formData.type,
+          difficulty: formData.difficulty,
           num_questions: formData.numQuestions
         },
         token

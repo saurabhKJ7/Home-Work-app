@@ -229,10 +229,16 @@ async def generate_code(
                 # Generate based on activity type
                 if payload.type == "Grid-based":
                     # Use grid-specific generation
-                    result = get_grid_function(varied_query, payload.type, payload.optimize_for_speed)
+                    result = get_grid_function(varied_query, payload.type, payload.optimize_for_speed, difficulty=payload.difficulty)
                 else:
                     # Use regular math/logic generation
-                    result = get_evaluate_function(rag_data, varied_query, optimize_for_speed=payload.optimize_for_speed)
+                    result = get_evaluate_function(
+                        rag_data,
+                        varied_query,
+                        optimize_for_speed=payload.optimize_for_speed,
+                        difficulty=payload.difficulty,
+                        activity_type=payload.type,
+                    )
                 
                 # Create unique question ID
                 question_id = str(uuid.uuid4())
@@ -248,7 +254,7 @@ async def generate_code(
                         "validation_function": result.code,
                         "code": result.code,
                         "grid_size": result.gridSize,
-                        "difficulty": result.difficulty
+                        "difficulty": getattr(result, 'difficulty', None) or payload.difficulty
                     }
                 else:
                     question_data = {
@@ -258,7 +264,8 @@ async def generate_code(
                         "type": payload.type,
                         "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
                         "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                        "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
+                        "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
+                        "difficulty": payload.difficulty
                     }
                 
                 logger.info("/generate-code: completed question %d", question_index + 1)
@@ -271,7 +278,7 @@ async def generate_code(
         # For single question, process directly (most common case)
         if num_questions == 1:
             if payload.type == "Grid-based":
-                result = get_grid_function(payload.user_query, payload.type, payload.optimize_for_speed)
+                result = get_grid_function(payload.user_query, payload.type, payload.optimize_for_speed, difficulty=payload.difficulty)
 
                 question_id = str(uuid.uuid4())
                 questions.append({
@@ -283,10 +290,16 @@ async def generate_code(
                     "validation_function": result.code,
                     "code": result.code,
                     "grid_size": result.gridSize,
-                    "difficulty": result.difficulty
+                    "difficulty": getattr(result, 'difficulty', None) or payload.difficulty
                 })
             else:
-                result = get_evaluate_function(rag_data, payload.user_query, optimize_for_speed=payload.optimize_for_speed)
+                result = get_evaluate_function(
+                    rag_data,
+                    payload.user_query,
+                    optimize_for_speed=payload.optimize_for_speed,
+                    difficulty=payload.difficulty,
+                    activity_type=payload.type,
+                )
                 question_id = str(uuid.uuid4())
                 questions.append({
                     "code": result.code,
@@ -295,7 +308,8 @@ async def generate_code(
                     "type": payload.type,
                     "input_example": result.inputExample if hasattr(result, 'inputExample') else None,
                     "expected_output": result.expectedOutput if hasattr(result, 'expectedOutput') else None,
-                    "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else []
+                    "validation_tests": [test.dict() for test in result.validationTests] if hasattr(result, 'validationTests') and result.validationTests else [],
+                    "difficulty": payload.difficulty
                 })
         else:
             # For multiple questions, use parallel processing
