@@ -252,7 +252,7 @@ async def generate_code(
                         "code": result.code,
                         "grid_size": result.gridSize,
                         "difficulty": result.difficulty,
-                        "feedback_hints": result.feedbackHints
+                        "feedback_hints": []
                     }
                 else:
                     question_data = {
@@ -289,7 +289,7 @@ async def generate_code(
                     "code": result.code,
                     "grid_size": result.gridSize,
                     "difficulty": result.difficulty,
-                    "feedback_hints": result.feedbackHints
+                    "feedback_hints": []
                 })
             else:
                 result = get_evaluate_function(rag_data, payload.user_query, optimize_for_speed=payload.optimize_for_speed)
