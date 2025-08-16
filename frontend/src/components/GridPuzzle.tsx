@@ -31,8 +31,10 @@ const GridPuzzle = ({ gridData, onSubmit, isReadOnly = false, correctAnswer, gri
   const handleCellChange = (row: number, col: number, value: string) => {
     if (isReadOnly || sanitizedGridData[row][col] !== 0) return;
     
-    const numValue = value === '' ? 0 : parseInt(value) || 0;
-    if (numValue < 0 || numValue > 9) return;
+    // Allow dynamic multi-digit integer input; treat empty as 0 (empty cell)
+    const cleaned = value.replace(/[^0-9-]/g, '');
+    const numValue = (cleaned === '' || cleaned === '-') ? 0 : parseInt(cleaned, 10);
+    if (Number.isNaN(numValue)) return;
     
     const newAnswers = [...answers];
     newAnswers[row][col] = numValue;
@@ -91,7 +93,8 @@ const GridPuzzle = ({ gridData, onSubmit, isReadOnly = false, correctAnswer, gri
                   value={cell === 0 ? '' : cell.toString()}
                   onChange={(e) => handleCellChange(rowIndex, colIndex, e.target.value)}
                   className="w-full h-full border-0 text-center p-0 bg-transparent focus:ring-0 focus:border-0"
-                  maxLength={1}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   disabled={isReadOnly}
                 />
               )}
